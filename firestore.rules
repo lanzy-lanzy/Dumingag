@@ -1,0 +1,310 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+    // Global default-deny safety net
+    match /{document=**} {
+      allow read, write: if false;
+    }
+
+    function isSignedIn() {
+      return request.auth != null;
+    }
+
+    function incoming() {
+      return request.resource.data;
+    }
+
+    function existing() {
+      return resource.data;
+    }
+
+    function isValidId(id) {
+      return id is string && id.size() >= 1 && id.size() <= 128 && id.matches('^[a-zA-Z0-9_\\-]+$');
+    }
+
+    function isAdmin() {
+      return isSignedIn() && (
+        (request.auth.token.email_verified == true && request.auth.token.email == 'bigbren480@gmail.com') ||
+        exists(/databases/$(database)/documents/admins/$(request.auth.uid))
+      );
+    }
+
+    function isValidLanguage(lang) {
+      return lang is string && lang in ['en', 'ceb', 'tl', 'es'];
+    }
+
+    function isValidAttractionCategory(cat) {
+      return cat is string && cat in ['HISTORICAL', 'NATURE', 'CULTURAL', 'LANDMARK', 'ORGANIC_FARM'];
+    }
+
+    function isValidEmergencyPriority(priority) {
+      return priority is string && priority in ['CRITICAL', 'HIGH', 'MEDICAL', 'STANDARD'];
+    }
+
+    function isValidTransitMode(mode) {
+      return mode is string && mode in ['TRICYCLE', 'HABAL_HABAL', 'BUS_VAN', 'JEEPNEY_MULTICAB'];
+    }
+
+    function isValidServiceStatus(status) {
+      return status is string && status in ['OPERATIONAL', 'LIMITED', 'ADVISORY'];
+    }
+
+    function isValidUserProfile(data) {
+      return data.userId is string &&
+             data.userId == request.auth.uid &&
+             data.displayName is string && data.displayName.size() >= 1 && data.displayName.size() <= 80 &&
+             (!('photoData' in data) || (data.photoData is string && data.photoData.size() <= 65536)) &&
+             isValidLanguage(data.preferredLanguage) &&
+             data.offlinePackEnabled is bool &&
+             data.createdAt is timestamp && data.createdAt <= request.time &&
+             data.updatedAt is timestamp && data.updatedAt <= request.time;
+    }
+
+    function isValidAdminRecord(data) {
+      return data.userId is string && data.userId.size() >= 1 && data.userId.size() <= 128 &&
+             data.email is string && data.email.size() >= 3 && data.email.size() <= 160 &&
+             data.grantedBy is string && data.grantedBy == request.auth.uid &&
+             data.createdAt is timestamp && data.createdAt <= request.time;
+    }
+
+    function isValidAttraction(data) {
+      return data.userId is string && data.userId.size() >= 1 && data.userId.size() <= 128 &&
+             data.mapNodeId is string && data.mapNodeId.size() >= 1 && data.mapNodeId.size() <= 80 &&
+             data.nameEn is string && data.nameEn.size() >= 2 && data.nameEn.size() <= 120 &&
+             (!('nameCeb' in data) || (data.nameCeb is string && data.nameCeb.size() <= 120)) &&
+             (!('nameTl' in data) || (data.nameTl is string && data.nameTl.size() <= 120)) &&
+             (!('nameEs' in data) || (data.nameEs is string && data.nameEs.size() <= 120)) &&
+             data.subtitleEn is string && data.subtitleEn.size() >= 2 && data.subtitleEn.size() <= 160 &&
+             data.descriptionEn is string && data.descriptionEn.size() >= 5 && data.descriptionEn.size() <= 1200 &&
+             (!('historyNoteEn' in data) || (data.historyNoteEn is string && data.historyNoteEn.size() <= 1000)) &&
+             data.barangay is string && data.barangay.size() >= 2 && data.barangay.size() <= 80 &&
+             isValidAttractionCategory(data.category) &&
+             data.latitude is number && data.latitude >= -90 && data.latitude <= 90 &&
+             data.longitude is number && data.longitude >= -180 && data.longitude <= 180 &&
+             data.openHours is string && data.openHours.size() >= 2 && data.openHours.size() <= 100 &&
+             data.entryFeeEn is string && data.entryFeeEn.size() >= 1 && data.entryFeeEn.size() <= 120 &&
+             data.bestTimeEn is string && data.bestTimeEn.size() >= 1 && data.bestTimeEn.size() <= 120 &&
+             data.transitHintEn is string && data.transitHintEn.size() >= 1 && data.transitHintEn.size() <= 240 &&
+             data.baseRating is number && data.baseRating >= 1 && data.baseRating <= 5 &&
+             data.imageKey is string && data.imageKey.size() >= 1 && data.imageKey.size() <= 40 &&
+             (!('photoData' in data) || (data.photoData is string && data.photoData.size() <= 65536)) &&
+             data.visibility is string && data.visibility == 'public' &&
+             data.createdAt is timestamp && data.createdAt <= request.time &&
+             data.updatedAt is timestamp && data.updatedAt <= request.time;
+    }
+
+    function isValidEmergencyContact(data) {
+      return data.userId is string && data.userId.size() >= 1 && data.userId.size() <= 128 &&
+             data.titleEn is string && data.titleEn.size() >= 2 && data.titleEn.size() <= 140 &&
+             data.department is string && data.department.size() >= 2 && data.department.size() <= 160 &&
+             data.phoneNumber is string && data.phoneNumber.size() >= 2 && data.phoneNumber.size() <= 40 &&
+             data.availability is string && data.availability.size() >= 2 && data.availability.size() <= 100 &&
+             isValidEmergencyPriority(data.priorityLevel) &&
+             (!('email' in data) || (data.email is string && data.email.size() <= 120)) &&
+             (!('websiteUrl' in data) || (data.websiteUrl is string && data.websiteUrl.size() <= 240)) &&
+             data.visibility is string && data.visibility == 'public' &&
+             data.createdAt is timestamp && data.createdAt <= request.time &&
+             data.updatedAt is timestamp && data.updatedAt <= request.time;
+    }
+
+    function isValidItineraryItem(data) {
+      return data.userId is string &&
+             data.userId == request.auth.uid &&
+             data.attractionId is string && data.attractionId.size() >= 1 && data.attractionId.size() <= 80 &&
+             data.attractionName is string && data.attractionName.size() >= 1 && data.attractionName.size() <= 120 &&
+             data.plannedDateMillis is int && data.plannedDateMillis >= 0 &&
+             (!('notes' in data) || (data.notes is string && data.notes.size() <= 500)) &&
+             data.reminderEnabled is bool &&
+             data.calendarSynced is bool &&
+             data.createdAt is timestamp && data.createdAt <= request.time &&
+             data.updatedAt is timestamp && data.updatedAt <= request.time;
+    }
+
+    function isValidReview(data) {
+      return data.userId is string &&
+             data.userId == request.auth.uid &&
+             data.authorName is string && data.authorName.size() >= 1 && data.authorName.size() <= 80 &&
+             data.attractionId is string && data.attractionId.size() >= 1 && data.attractionId.size() <= 80 &&
+             data.attractionName is string && data.attractionName.size() >= 1 && data.attractionName.size() <= 120 &&
+             data.rating is int && data.rating >= 1 && data.rating <= 5 &&
+             data.comment is string && data.comment.size() >= 3 && data.comment.size() <= 800 &&
+             data.visitTag is string && data.visitTag.size() >= 1 && data.visitTag.size() <= 40 &&
+             data.visibility is string && data.visibility == 'public' &&
+             data.createdAt is timestamp && data.createdAt <= request.time &&
+             data.updatedAt is timestamp && data.updatedAt <= request.time;
+    }
+
+    function isValidTransitMethod(data) {
+      return data.userId is string &&
+             data.userId == request.auth.uid &&
+             data.name is string && data.name.size() >= 2 && data.name.size() <= 120 &&
+             isValidTransitMode(data.modeCategory) &&
+             data.operatorName is string && data.operatorName.size() >= 2 && data.operatorName.size() <= 100 &&
+             data.routeSummary is string && data.routeSummary.size() >= 3 && data.routeSummary.size() <= 240 &&
+             data.scheduleText is string && data.scheduleText.size() >= 3 && data.scheduleText.size() <= 160 &&
+             data.fareRangePhp is string && data.fareRangePhp.size() >= 1 && data.fareRangePhp.size() <= 60 &&
+             data.durationText is string && data.durationText.size() >= 1 && data.durationText.size() <= 60 &&
+             data.terminalLocation is string && data.terminalLocation.size() >= 2 && data.terminalLocation.size() <= 160 &&
+             (!('travelTip' in data) || (data.travelTip is string && data.travelTip.size() <= 400)) &&
+             isValidServiceStatus(data.serviceStatus) &&
+             data.visibility is string && data.visibility == 'public' &&
+             data.createdAt is timestamp && data.createdAt <= request.time &&
+             data.updatedAt is timestamp && data.updatedAt <= request.time;
+    }
+
+    match /users/{userId} {
+      allow get, list: if isSignedIn() && request.auth.uid == userId;
+
+      allow create: if isSignedIn() &&
+                       isValidId(userId) &&
+                       request.auth.uid == userId &&
+                       incoming().keys().hasAll(['userId', 'displayName', 'preferredLanguage', 'offlinePackEnabled', 'createdAt', 'updatedAt']) &&
+                       incoming().keys().hasOnly(['userId', 'displayName', 'photoData', 'preferredLanguage', 'offlinePackEnabled', 'createdAt', 'updatedAt']) &&
+                       isValidUserProfile(incoming());
+
+      allow update: if isSignedIn() &&
+                       isValidId(userId) &&
+                       request.auth.uid == userId &&
+                       isValidUserProfile(incoming()) &&
+                       incoming().userId == existing().userId &&
+                       incoming().createdAt == existing().createdAt &&
+                       incoming().diff(existing()).affectedKeys().hasOnly(['displayName', 'photoData', 'preferredLanguage', 'offlinePackEnabled', 'updatedAt']);
+
+      allow delete: if isSignedIn() && isValidId(userId) && request.auth.uid == userId;
+
+      match /itineraries/{itineraryId} {
+        allow get, list: if isSignedIn() && request.auth.uid == userId;
+
+        allow create: if isSignedIn() &&
+                         isValidId(userId) &&
+                         isValidId(itineraryId) &&
+                         request.auth.uid == userId &&
+                         incoming().keys().hasAll(['userId', 'attractionId', 'attractionName', 'plannedDateMillis', 'reminderEnabled', 'calendarSynced', 'createdAt', 'updatedAt']) &&
+                         incoming().keys().hasOnly(['userId', 'attractionId', 'attractionName', 'plannedDateMillis', 'notes', 'reminderEnabled', 'calendarSynced', 'createdAt', 'updatedAt']) &&
+                         isValidItineraryItem(incoming());
+
+        allow update: if isSignedIn() &&
+                         isValidId(userId) &&
+                         isValidId(itineraryId) &&
+                         request.auth.uid == userId &&
+                         isValidItineraryItem(incoming()) &&
+                         incoming().userId == existing().userId &&
+                         incoming().createdAt == existing().createdAt &&
+                         incoming().diff(existing()).affectedKeys().hasOnly(['plannedDateMillis', 'notes', 'reminderEnabled', 'calendarSynced', 'updatedAt']);
+
+        allow delete: if isSignedIn() && isValidId(userId) && isValidId(itineraryId) && request.auth.uid == userId;
+      }
+    }
+
+    match /admins/{adminUid} {
+      allow get: if isSignedIn() && (request.auth.uid == adminUid || isAdmin());
+      allow list: if false;
+
+      allow create: if isAdmin() &&
+                       isValidId(adminUid) &&
+                       incoming().userId == adminUid &&
+                       incoming().keys().hasAll(['userId', 'email', 'grantedBy', 'createdAt']) &&
+                       incoming().keys().hasOnly(['userId', 'email', 'grantedBy', 'createdAt']) &&
+                       isValidAdminRecord(incoming());
+
+      allow update: if isAdmin() &&
+                       isValidId(adminUid) &&
+                       isValidAdminRecord(incoming()) &&
+                       incoming().userId == existing().userId &&
+                       incoming().createdAt == existing().createdAt &&
+                       incoming().diff(existing()).affectedKeys().hasOnly(['email', 'grantedBy']);
+
+      allow delete: if isAdmin() && isValidId(adminUid);
+    }
+
+    match /attractions/{attractionId} {
+      allow get: if isSignedIn() && (existing().visibility == 'public' || isAdmin());
+      allow list: if isSignedIn() && resource.data.visibility == 'public';
+
+      allow create: if isAdmin() &&
+                       isValidId(attractionId) &&
+                       incoming().userId == request.auth.uid &&
+                       incoming().keys().hasAll(['userId', 'mapNodeId', 'nameEn', 'subtitleEn', 'descriptionEn', 'barangay', 'category', 'latitude', 'longitude', 'openHours', 'entryFeeEn', 'bestTimeEn', 'transitHintEn', 'baseRating', 'imageKey', 'visibility', 'createdAt', 'updatedAt']) &&
+                       incoming().keys().hasOnly(['userId', 'mapNodeId', 'nameEn', 'nameCeb', 'nameTl', 'nameEs', 'subtitleEn', 'descriptionEn', 'historyNoteEn', 'barangay', 'category', 'latitude', 'longitude', 'openHours', 'entryFeeEn', 'bestTimeEn', 'transitHintEn', 'baseRating', 'imageKey', 'photoData', 'visibility', 'createdAt', 'updatedAt']) &&
+                       isValidAttraction(incoming());
+
+      allow update: if isAdmin() &&
+                       isValidId(attractionId) &&
+                       isValidAttraction(incoming()) &&
+                       incoming().userId == existing().userId &&
+                       incoming().visibility == existing().visibility &&
+                       incoming().createdAt == existing().createdAt &&
+                       incoming().diff(existing()).affectedKeys().hasOnly(['mapNodeId', 'nameEn', 'nameCeb', 'nameTl', 'nameEs', 'subtitleEn', 'descriptionEn', 'historyNoteEn', 'barangay', 'category', 'latitude', 'longitude', 'openHours', 'entryFeeEn', 'bestTimeEn', 'transitHintEn', 'baseRating', 'imageKey', 'photoData', 'updatedAt']);
+
+      allow delete: if isAdmin() && isValidId(attractionId);
+    }
+
+    match /emergency_contacts/{contactId} {
+      allow get: if isSignedIn() && (existing().visibility == 'public' || isAdmin());
+      allow list: if isSignedIn() && resource.data.visibility == 'public';
+
+      allow create: if isAdmin() &&
+                       isValidId(contactId) &&
+                       incoming().userId == request.auth.uid &&
+                       incoming().keys().hasAll(['userId', 'titleEn', 'department', 'phoneNumber', 'availability', 'priorityLevel', 'visibility', 'createdAt', 'updatedAt']) &&
+                       incoming().keys().hasOnly(['userId', 'titleEn', 'department', 'phoneNumber', 'availability', 'priorityLevel', 'email', 'websiteUrl', 'visibility', 'createdAt', 'updatedAt']) &&
+                       isValidEmergencyContact(incoming());
+
+      allow update: if isAdmin() &&
+                       isValidId(contactId) &&
+                       isValidEmergencyContact(incoming()) &&
+                       incoming().userId == existing().userId &&
+                       incoming().visibility == existing().visibility &&
+                       incoming().createdAt == existing().createdAt &&
+                       incoming().diff(existing()).affectedKeys().hasOnly(['titleEn', 'department', 'phoneNumber', 'availability', 'priorityLevel', 'email', 'websiteUrl', 'updatedAt']);
+
+      allow delete: if isAdmin() && isValidId(contactId);
+    }
+
+    match /reviews/{reviewId} {
+      allow get: if isSignedIn() && (existing().visibility == 'public' || existing().userId == request.auth.uid);
+      allow list: if isSignedIn() && (resource.data.visibility == 'public' || resource.data.userId == request.auth.uid);
+
+      allow create: if isSignedIn() &&
+                       isValidId(reviewId) &&
+                       incoming().keys().hasAll(['userId', 'authorName', 'attractionId', 'attractionName', 'rating', 'comment', 'visitTag', 'visibility', 'createdAt', 'updatedAt']) &&
+                       incoming().keys().hasOnly(['userId', 'authorName', 'attractionId', 'attractionName', 'rating', 'comment', 'visitTag', 'visibility', 'createdAt', 'updatedAt']) &&
+                       isValidReview(incoming());
+
+      allow update: if isSignedIn() &&
+                       isValidId(reviewId) &&
+                       existing().userId == request.auth.uid &&
+                       isValidReview(incoming()) &&
+                       incoming().userId == existing().userId &&
+                       incoming().attractionId == existing().attractionId &&
+                       incoming().attractionName == existing().attractionName &&
+                       incoming().visibility == existing().visibility &&
+                       incoming().createdAt == existing().createdAt &&
+                       incoming().diff(existing()).affectedKeys().hasOnly(['rating', 'comment', 'visitTag', 'updatedAt']);
+
+      allow delete: if isSignedIn() && isValidId(reviewId) && existing().userId == request.auth.uid;
+    }
+
+    match /transit_methods/{transitId} {
+      allow get: if isSignedIn() && (existing().visibility == 'public' || existing().userId == request.auth.uid);
+      allow list: if isSignedIn() && (resource.data.visibility == 'public' || resource.data.userId == request.auth.uid);
+
+      allow create: if isSignedIn() &&
+                       isValidId(transitId) &&
+                       incoming().keys().hasAll(['userId', 'name', 'modeCategory', 'operatorName', 'routeSummary', 'scheduleText', 'fareRangePhp', 'durationText', 'terminalLocation', 'serviceStatus', 'visibility', 'createdAt', 'updatedAt']) &&
+                       incoming().keys().hasOnly(['userId', 'name', 'modeCategory', 'operatorName', 'routeSummary', 'scheduleText', 'fareRangePhp', 'durationText', 'terminalLocation', 'travelTip', 'serviceStatus', 'visibility', 'createdAt', 'updatedAt']) &&
+                       isValidTransitMethod(incoming());
+
+      allow update: if isSignedIn() &&
+                       isValidId(transitId) &&
+                       existing().userId == request.auth.uid &&
+                       isValidTransitMethod(incoming()) &&
+                       incoming().userId == existing().userId &&
+                       incoming().visibility == existing().visibility &&
+                       incoming().createdAt == existing().createdAt &&
+                       incoming().diff(existing()).affectedKeys().hasOnly(['name', 'modeCategory', 'operatorName', 'routeSummary', 'scheduleText', 'fareRangePhp', 'durationText', 'terminalLocation', 'travelTip', 'serviceStatus', 'updatedAt']);
+
+      allow delete: if isSignedIn() && isValidId(transitId) && existing().userId == request.auth.uid;
+    }
+  }
+}

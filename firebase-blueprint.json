@@ -1,0 +1,168 @@
+{
+  "entities": {
+    "UserProfile": {
+      "title": "UserProfile",
+      "description": "Traveler preferences and editable profile metadata (display name and photo thumbnail) synced per user.",
+      "type": "object",
+      "properties": {
+        "userId": { "type": "string", "description": "Firebase Auth UID of the traveler" },
+        "displayName": { "type": "string", "description": "Editable display name shown on profile and reviews" },
+        "photoData": { "type": "string", "description": "Optional compressed base64 JPEG profile photo (DP)" },
+        "preferredLanguage": { "type": "string", "enum": ["en", "ceb", "tl", "es"], "description": "Preferred app language code" },
+        "offlinePackEnabled": { "type": "boolean", "description": "Whether the offline pack has been downloaded" },
+        "createdAt": { "type": "string", "format": "date-time", "description": "Server timestamp on creation" },
+        "updatedAt": { "type": "string", "format": "date-time", "description": "Server timestamp on update" }
+      },
+      "required": ["userId", "displayName", "preferredLanguage", "offlinePackEnabled", "createdAt", "updatedAt"]
+    },
+    "AdminUser": {
+      "title": "AdminUser",
+      "description": "Trusted administrator grant record keyed by Firebase Auth UID.",
+      "type": "object",
+      "properties": {
+        "userId": { "type": "string", "description": "Admin Firebase Auth UID" },
+        "email": { "type": "string", "description": "Admin verified email" },
+        "grantedBy": { "type": "string", "description": "UID of admin who granted the role" },
+        "createdAt": { "type": "string", "format": "date-time", "description": "Server timestamp on creation" }
+      },
+      "required": ["userId", "email", "grantedBy", "createdAt"]
+    },
+    "AttractionRecord": {
+      "title": "AttractionRecord",
+      "description": "Dynamically managed Dumingag local tourist attraction synced from Firestore to local Room cache.",
+      "type": "object",
+      "properties": {
+        "userId": { "type": "string", "description": "Admin Firebase Auth UID who created the attraction" },
+        "mapNodeId": { "type": "string", "description": "Associated offline map graph node ID" },
+        "nameEn": { "type": "string", "description": "Attraction name" },
+        "nameCeb": { "type": "string", "description": "Cebuano attraction name" },
+        "nameTl": { "type": "string", "description": "Tagalog attraction name" },
+        "nameEs": { "type": "string", "description": "Spanish attraction name" },
+        "subtitleEn": { "type": "string", "description": "Short subtitle or tagline" },
+        "descriptionEn": { "type": "string", "description": "Full attraction description" },
+        "historyNoteEn": { "type": "string", "description": "Heritage or conservation note" },
+        "barangay": { "type": "string", "description": "Barangay location in Dumingag" },
+        "category": { "type": "string", "enum": ["HISTORICAL", "NATURE", "CULTURAL", "LANDMARK", "ORGANIC_FARM"], "description": "Attraction category" },
+        "latitude": { "type": "number", "description": "GPS latitude" },
+        "longitude": { "type": "number", "description": "GPS longitude" },
+        "openHours": { "type": "string", "description": "Visiting hours" },
+        "entryFeeEn": { "type": "string", "description": "Entry fee summary" },
+        "bestTimeEn": { "type": "string", "description": "Best time to visit" },
+        "transitHintEn": { "type": "string", "description": "Local transit guidance" },
+        "baseRating": { "type": "number", "description": "Rating from 1.0 to 5.0" },
+        "imageKey": { "type": "string", "description": "Bundled visual theme key" },
+        "photoData": { "type": "string", "description": "Optional compressed base64 JPEG cover image" },
+        "visibility": { "type": "string", "enum": ["public"], "description": "Public visibility scope" },
+        "createdAt": { "type": "string", "format": "date-time", "description": "Server timestamp on creation" },
+        "updatedAt": { "type": "string", "format": "date-time", "description": "Server timestamp on update" }
+      },
+      "required": ["userId", "mapNodeId", "nameEn", "subtitleEn", "descriptionEn", "barangay", "category", "latitude", "longitude", "openHours", "entryFeeEn", "bestTimeEn", "transitHintEn", "baseRating", "imageKey", "visibility", "createdAt", "updatedAt"]
+    },
+    "EmergencyContactRecord": {
+      "title": "EmergencyContactRecord",
+      "description": "Dynamically managed Dumingag emergency hotline and responder directory entry.",
+      "type": "object",
+      "properties": {
+        "userId": { "type": "string", "description": "Admin Firebase Auth UID who created the contact" },
+        "titleEn": { "type": "string", "description": "Emergency office or hotline title" },
+        "department": { "type": "string", "description": "Department or agency name" },
+        "phoneNumber": { "type": "string", "description": "Hotline phone number" },
+        "availability": { "type": "string", "description": "Operating hours or availability" },
+        "priorityLevel": { "type": "string", "enum": ["CRITICAL", "HIGH", "MEDICAL", "STANDARD"], "description": "Alert priority level" },
+        "email": { "type": "string", "description": "Optional official email" },
+        "websiteUrl": { "type": "string", "description": "Optional official portal URL" },
+        "visibility": { "type": "string", "enum": ["public"], "description": "Public visibility scope" },
+        "createdAt": { "type": "string", "format": "date-time", "description": "Server timestamp on creation" },
+        "updatedAt": { "type": "string", "format": "date-time", "description": "Server timestamp on update" }
+      },
+      "required": ["userId", "titleEn", "department", "phoneNumber", "availability", "priorityLevel", "visibility", "createdAt", "updatedAt"]
+    },
+    "ItineraryItem": {
+      "title": "ItineraryItem",
+      "description": "Planned Dumingag stop in a traveler's itinerary.",
+      "type": "object",
+      "properties": {
+        "userId": { "type": "string", "description": "Owner UID" },
+        "attractionId": { "type": "string", "description": "ID of the Dumingag attraction" },
+        "attractionName": { "type": "string", "description": "Name of the attraction" },
+        "plannedDateMillis": { "type": "integer", "description": "Scheduled epoch timestamp in ms" },
+        "notes": { "type": "string", "description": "Optional traveler notes" },
+        "reminderEnabled": { "type": "boolean", "description": "Whether push/local reminder is enabled" },
+        "calendarSynced": { "type": "boolean", "description": "Whether synced to device digital calendar" },
+        "createdAt": { "type": "string", "format": "date-time", "description": "Server timestamp on creation" },
+        "updatedAt": { "type": "string", "format": "date-time", "description": "Server timestamp on update" }
+      },
+      "required": ["userId", "attractionId", "attractionName", "plannedDateMillis", "reminderEnabled", "calendarSynced", "createdAt", "updatedAt"]
+    },
+    "CommunityReview": {
+      "title": "CommunityReview",
+      "description": "Traveler review and rating for a Dumingag attraction.",
+      "type": "object",
+      "properties": {
+        "userId": { "type": "string", "description": "Author Firebase Auth UID" },
+        "authorName": { "type": "string", "description": "Author display name" },
+        "attractionId": { "type": "string", "description": "ID of the reviewed attraction" },
+        "attractionName": { "type": "string", "description": "Name of the reviewed attraction" },
+        "rating": { "type": "integer", "description": "Star rating from 1 to 5" },
+        "comment": { "type": "string", "description": "Traveler review text" },
+        "visitTag": { "type": "string", "description": "Trip type tag such as Solo, Family, Hiker, Eco-Tour" },
+        "visibility": { "type": "string", "enum": ["public"], "description": "Review visibility scope" },
+        "createdAt": { "type": "string", "format": "date-time", "description": "Server timestamp on creation" },
+        "updatedAt": { "type": "string", "format": "date-time", "description": "Server timestamp on update" }
+      },
+      "required": ["userId", "authorName", "attractionId", "attractionName", "rating", "comment", "visitTag", "visibility", "createdAt", "updatedAt"]
+    },
+    "TransitMethod": {
+      "title": "TransitMethod",
+      "description": "Common transportation method, fare range, schedule, and terminal guide in Dumingag.",
+      "type": "object",
+      "properties": {
+        "userId": { "type": "string", "description": "Contributor Firebase Auth UID" },
+        "name": { "type": "string", "description": "Display title of the transportation method or route" },
+        "modeCategory": { "type": "string", "enum": ["TRICYCLE", "HABAL_HABAL", "BUS_VAN", "JEEPNEY_MULTICAB"], "description": "Normalized transport category" },
+        "operatorName": { "type": "string", "description": "Local TODA, rider association, or bus/van operator" },
+        "routeSummary": { "type": "string", "description": "Coverage area or corridor served" },
+        "scheduleText": { "type": "string", "description": "Operating hours and trip frequency" },
+        "fareRangePhp": { "type": "string", "description": "Typical fare range in Philippine Pesos" },
+        "durationText": { "type": "string", "description": "Typical travel duration" },
+        "terminalLocation": { "type": "string", "description": "Boarding terminal or pickup junction" },
+        "travelTip": { "type": "string", "description": "Optional safety or boarding advice for travelers" },
+        "serviceStatus": { "type": "string", "enum": ["OPERATIONAL", "LIMITED", "ADVISORY"], "description": "Live operational status" },
+        "visibility": { "type": "string", "enum": ["public"], "description": "Public visibility scope" },
+        "createdAt": { "type": "string", "format": "date-time", "description": "Server timestamp on creation" },
+        "updatedAt": { "type": "string", "format": "date-time", "description": "Server timestamp on update" }
+      },
+      "required": ["userId", "name", "modeCategory", "operatorName", "routeSummary", "scheduleText", "fareRangePhp", "durationText", "terminalLocation", "serviceStatus", "visibility", "createdAt", "updatedAt"]
+    }
+  },
+  "firestore": {
+    "/users/{userId}": {
+      "schema": { "$ref": "#/entities/UserProfile" },
+      "description": "Per-user traveler profile, custom DP thumbnail, and language/offline preferences."
+    },
+    "/users/{userId}/itineraries/{itineraryId}": {
+      "schema": { "$ref": "#/entities/ItineraryItem" },
+      "description": "Traveler's planned itinerary stops and calendar reminder state."
+    },
+    "/admins/{adminUid}": {
+      "schema": { "$ref": "#/entities/AdminUser" },
+      "description": "Authorized admin role lookup records."
+    },
+    "/attractions/{attractionId}": {
+      "schema": { "$ref": "#/entities/AttractionRecord" },
+      "description": "Admin-managed local attractions in Dumingag, synced live across all travelers."
+    },
+    "/emergency_contacts/{contactId}": {
+      "schema": { "$ref": "#/entities/EmergencyContactRecord" },
+      "description": "Admin-managed Dumingag emergency contacts and LGU hotlines."
+    },
+    "/reviews/{reviewId}": {
+      "schema": { "$ref": "#/entities/CommunityReview" },
+      "description": "Community reviews for Dumingag attractions."
+    },
+    "/transit_methods/{transitId}": {
+      "schema": { "$ref": "#/entities/TransitMethod" },
+      "description": "Real-time Dumingag transportation methods, fares, schedules, and terminal tips."
+    }
+  }
+}

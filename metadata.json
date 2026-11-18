@@ -1,0 +1,6 @@
+{
+  "name": "Dumingag",
+  "description": "Interactive tourism guide, offline maps, transit, weather, emergency contacts, and community reviews for Dumingag, Zamboanga del Sur.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
