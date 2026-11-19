@@ -25,6 +25,8 @@ import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.filled.Bookmark
 import androidx.compose.material.icons.filled.BookmarkBorder
 import androidx.compose.material.icons.filled.Directions
+import androidx.compose.material.icons.filled.Favorite
+import androidx.compose.material.icons.filled.FavoriteBorder
 import androidx.compose.material.icons.filled.LocationOn
 import androidx.compose.material.icons.filled.Search
 import androidx.compose.material.icons.filled.Star
@@ -66,6 +68,8 @@ import com.example.viewmodel.AttractionsViewModel
 fun AttractionsListScreen(
     viewModel: AttractionsViewModel,
     language: AppLanguage,
+    favoriteIds: Set<String> = emptySet(),
+    onToggleFavorite: (Attraction) -> Unit = {},
     onAttractionClick: (Attraction) -> Unit,
     onNavigateOffline: (Attraction) -> Unit,
     onBackClick: () -> Unit
@@ -215,9 +219,11 @@ fun AttractionsListScreen(
                                 attraction = attraction,
                                 language = language,
                                 isSavedOffline = savedIds.contains(attraction.id),
+                                isFavorite = favoriteIds.contains(attraction.id),
                                 onClick = { onAttractionClick(attraction) },
                                 onNavigateOffline = { onNavigateOffline(attraction) },
-                                onToggleSaveOffline = { viewModel.toggleSavedOffline(attraction) }
+                                onToggleSaveOffline = { viewModel.toggleSavedOffline(attraction) },
+                                onToggleFavorite = { onToggleFavorite(attraction) }
                             )
                         }
                         item { Spacer(modifier = Modifier.height(16.dp)) }
@@ -233,9 +239,11 @@ private fun AttractionDirectoryRowCard(
     attraction: Attraction,
     language: AppLanguage,
     isSavedOffline: Boolean,
+    isFavorite: Boolean,
     onClick: () -> Unit,
     onNavigateOffline: () -> Unit,
-    onToggleSaveOffline: () -> Unit
+    onToggleSaveOffline: () -> Unit,
+    onToggleFavorite: () -> Unit
 ) {
     Card(
         modifier = Modifier
@@ -344,6 +352,18 @@ private fun AttractionDirectoryRowCard(
                     verticalAlignment = Alignment.CenterVertically,
                     modifier = Modifier.align(Alignment.CenterVertically)
                 ) {
+                    IconButton(
+                        onClick = onToggleFavorite,
+                        modifier = Modifier
+                            .minimumInteractiveComponentSize()
+                            .testTag("directory_favorite_${attraction.id}")
+                    ) {
+                        Icon(
+                            imageVector = if (isFavorite) Icons.Default.Favorite else Icons.Default.FavoriteBorder,
+                            contentDescription = if (isFavorite) "Remove from favorites" else "Add to favorites",
+                            tint = if (isFavorite) Color(0xFFE11D48) else MaterialTheme.colorScheme.primary
+                        )
+                    }
                     IconButton(
                         onClick = onToggleSaveOffline,
                         modifier = Modifier

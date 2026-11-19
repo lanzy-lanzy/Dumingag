@@ -53,6 +53,9 @@ class DumingagViewModel(
     private val _selectedCategory = MutableStateFlow(AttractionCategory.ALL)
     val selectedCategory: StateFlow<AttractionCategory> = _selectedCategory.asStateFlow()
 
+    private val _showFavoritesOnly = MutableStateFlow(false)
+    val showFavoritesOnly: StateFlow<Boolean> = _showFavoritesOnly.asStateFlow()
+
     private val _selectedAttraction = MutableStateFlow<Attraction?>(null)
     val selectedAttraction: StateFlow<Attraction?> = _selectedAttraction.asStateFlow()
 
@@ -95,6 +98,17 @@ class DumingagViewModel(
         }
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(STOP_TIMEOUT), userDisplayName)
 
+    val favoriteAttractionIds: StateFlow<Set<String>> = userProfile
+        .map { profile -> profile?.favoriteAttractionIds?.toSet().orEmpty() }
+        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(STOP_TIMEOUT), emptySet())
+
+    val favoriteAttractions: StateFlow<List<Attraction>> = combine(
+        attractionRepo.allAttractions,
+        favoriteAttractionIds
+    ) { all, favIds ->
+        all.filter { it.id in favIds }
+    }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(STOP_TIMEOUT), emptyList())
+
     val language: StateFlow<AppLanguage> = offlineRepo.selectedLanguage
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(STOP_TIMEOUT), AppLanguage.EN)
 
@@ -126,18 +140,20 @@ class DumingagViewModel(
         attractionRepo.allAttractions,
         _searchQuery,
         _selectedCategory,
-        language
-    ) { allAttractions, query, category, lang ->
+        language,
+        combine(_showFavoritesOnly, favoriteAttractionIds) { favOnly, favIds -> favOnly to favIds }
+    ) { allAttractions, query, category, lang, (favOnly, favIds) ->
         val trimmed = query.trim().lowercase()
         allAttractions.filter { attraction ->
             val catMatch = category == AttractionCategory.ALL || attraction.category == category
+            val favMatch = !favOnly || attraction.id in favIds
             val queryMatch = trimmed.isEmpty() ||
                 attraction.name.get(lang).lowercase().contains(trimmed) ||
                 attraction.name.en.lowercase().contains(trimmed) ||
                 attraction.barangay.lowercase().contains(trimmed) ||
                 attraction.subtitle.get(lang).lowercase().contains(trimmed) ||
                 attraction.description.get(lang).lowercase().contains(trimmed)
-            catMatch && queryMatch
+            catMatch && favMatch && queryMatch
         }
     }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(STOP_TIMEOUT), DumingagSeedData.attractions)
 
@@ -280,8 +296,35 @@ class DumingagViewModel(
         _selectedCategory.value = category
     }
 
+    fun toggleFavoritesOnly() {
+        _showFavoritesOnly.value = !_showFavoritesOnly.value
+    }
+
+    fun setFavoritesOnly(enabled: Boolean) {
+        _showFavoritesOnly.value = enabled
+    }
+
     fun selectAttraction(attraction: Attraction?) {
         _selectedAttraction.value = attraction
+    }
+
+    fun toggleFavoriteAttraction(attraction: Attraction) {
+        viewModelScope.launch {
+            val res = cloudRepo.toggleFavoriteAttraction(
+                userId = currentUserId,
+                attractionId = attraction.id,
+                displayNameFallback = effectiveDisplayName.value
+            )
+            res.onSuccess { added ->
+                _statusMessage.value = if (added) {
+                    "Added ${attraction.name.en} to Favorites"
+                } else {
+                    "Removed ${attraction.name.en} from Favorites"
+                }
+            }.onFailure { err ->
+                _statusMessage.value = err.message ?: "Unable to update favorites"
+            }
+        }
     }
 
     fun setLanguage(lang: AppLanguage) {

@@ -216,6 +216,7 @@ data class UserProfile(
     val userId: String = "",
     val displayName: String = "",
     val photoData: String = "",
+    val favoriteAttractionIds: List<String> = emptyList(),
     val preferredLanguage: String = "en",
     val offlinePackEnabled: Boolean = false,
     @com.google.firebase.firestore.ServerTimestamp val createdAt: Timestamp? = null,

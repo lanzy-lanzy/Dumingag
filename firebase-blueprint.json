@@ -8,6 +8,7 @@
         "userId": { "type": "string", "description": "Firebase Auth UID of the traveler" },
         "displayName": { "type": "string", "description": "Editable display name shown on profile and reviews" },
         "photoData": { "type": "string", "description": "Optional compressed base64 JPEG profile photo (DP)" },
+        "favoriteAttractionIds": { "type": "array", "items": { "type": "string" }, "description": "Bookmarked Dumingag attraction IDs stored per user" },
         "preferredLanguage": { "type": "string", "enum": ["en", "ceb", "tl", "es"], "description": "Preferred app language code" },
         "offlinePackEnabled": { "type": "boolean", "description": "Whether the offline pack has been downloaded" },
         "createdAt": { "type": "string", "format": "date-time", "description": "Server timestamp on creation" },

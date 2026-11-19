@@ -1,5 +1,6 @@
 package com.example.ui.screens
 
+import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
@@ -14,58 +15,57 @@ import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
-import androidx.compose.foundation.lazy.grid.items
-import com.example.R
 import androidx.compose.foundation.lazy.LazyRow
+import androidx.compose.foundation.lazy.grid.items
 import androidx.compose.foundation.lazy.items
-import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
-import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.Logout
 import androidx.compose.material.icons.filled.AddComment
 import androidx.compose.material.icons.filled.AdminPanelSettings
-import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.Edit
+import androidx.compose.material.icons.filled.Favorite
 import androidx.compose.material.icons.filled.Star
-import androidx.compose.material.icons.filled.StarBorder
 import androidx.compose.material.icons.filled.Translate
-import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.FilledTonalButton
 import androidx.compose.material3.FilterChip
+import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.material3.minimumInteractiveComponentSize
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
-import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
+import com.example.R
 import com.example.localization.AppStrings
 import com.example.model.AppLanguage
 import com.example.model.Attraction
 import com.example.model.CommunityReview
 import com.example.model.UiState
+import com.example.ui.components.AttractionCoverImage
+import com.example.ui.components.ComposeReviewDialog
+import com.example.ui.components.ReviewCard
 import com.example.ui.components.UserAvatar
-import java.text.SimpleDateFormat
-import java.util.Locale
+import com.example.ui.theme.MapRatingGold
 
 @Composable
 fun CommunityReviewsScreen(
@@ -76,11 +76,14 @@ fun CommunityReviewsScreen(
     userPhotoData: String,
     isAdmin: Boolean,
     attractions: List<Attraction>,
+    favoriteAttractions: List<Attraction> = emptyList(),
     reviewsState: UiState<List<CommunityReview>>,
     onOpenLanguagePicker: () -> Unit,
     onEditProfile: () -> Unit,
     onOpenAdminConsole: () -> Unit,
     onSignOut: () -> Unit,
+    onOpenAttraction: (Attraction) -> Unit = {},
+    onToggleFavorite: (Attraction) -> Unit = {},
     onSubmitReview: (Attraction, Int, String, String) -> Unit,
     onUpdateReview: (String, Int, String, String) -> Unit,
     onDeleteReview: (String) -> Unit,
@@ -106,7 +109,8 @@ fun CommunityReviewsScreen(
                 }
             }
         }
-        // Traveler Profile, DP Editor, Admin Console & Sign-Out Card
+
+        // Traveler Profile, Saved Favorites Quick Access, DP Editor, Admin Console & Sign-Out Card
         pageSection {
             Card(
                 shape = RoundedCornerShape(20.dp),
@@ -170,7 +174,6 @@ fun CommunityReviewsScreen(
                                 color = MaterialTheme.colorScheme.secondary
                             )
                         }
-
                     }
 
                     @OptIn(ExperimentalLayoutApi::class)
@@ -193,7 +196,10 @@ fun CommunityReviewsScreen(
                         }
 
                         onVerifyEmail?.let { verify ->
-                            TextButton(onClick = verify) { Text("Verify email") }
+                            TextButton(
+                                onClick = verify,
+                                modifier = Modifier.heightIn(min = 48.dp)
+                            ) { Text("Verify email") }
                         }
                         if (isAdmin) {
                             Button(
@@ -222,6 +228,94 @@ fun CommunityReviewsScreen(
                                 .testTag("sign_out_button")
                         ) {
                             Icon(Icons.AutoMirrored.Filled.Logout, contentDescription = "Sign out")
+                        }
+                    }
+
+                    HorizontalDivider(color = MaterialTheme.colorScheme.outline.copy(alpha = 0.2f))
+
+                    // My Favorites Quick Access in Profile Card
+                    Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                        Row(
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.spacedBy(6.dp)
+                        ) {
+                            Icon(
+                                imageVector = Icons.Default.Favorite,
+                                contentDescription = null,
+                                tint = Color(0xFFE11D48),
+                                modifier = Modifier.size(17.dp)
+                            )
+                            Text(
+                                text = "My Favorite Attractions (${favoriteAttractions.size})",
+                                style = MaterialTheme.typography.titleSmall,
+                                fontWeight = FontWeight.Bold
+                            )
+                        }
+
+                        if (favoriteAttractions.isEmpty()) {
+                            Text(
+                                text = "Bookmark attractions with the heart icon on Explore or Map for quick access here.",
+                                style = MaterialTheme.typography.bodySmall,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant
+                            )
+                        } else {
+                            LazyRow(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+                                items(favoriteAttractions, key = { it.id }) { fav ->
+                                    Card(
+                                        shape = RoundedCornerShape(16.dp),
+                                        colors = CardDefaults.cardColors(
+                                            containerColor = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.55f)
+                                        ),
+                                        border = BorderStroke(1.dp, MaterialTheme.colorScheme.outline.copy(alpha = 0.2f)),
+                                        modifier = Modifier
+                                            .width(210.dp)
+                                            .clip(RoundedCornerShape(16.dp))
+                                            .clickable { onOpenAttraction(fav) }
+                                            .testTag("reviews_profile_favorite_${fav.id}")
+                                    ) {
+                                        Row(
+                                            modifier = Modifier.padding(8.dp),
+                                            verticalAlignment = Alignment.CenterVertically
+                                        ) {
+                                            AttractionCoverImage(
+                                                attraction = fav,
+                                                contentDescription = fav.name.get(language),
+                                                modifier = Modifier
+                                                    .size(48.dp)
+                                                    .clip(RoundedCornerShape(12.dp)),
+                                                contentScale = ContentScale.Crop
+                                            )
+                                            Spacer(modifier = Modifier.width(8.dp))
+                                            Column(modifier = Modifier.weight(1f)) {
+                                                Text(
+                                                    text = fav.name.get(language),
+                                                    style = MaterialTheme.typography.labelLarge,
+                                                    maxLines = 1,
+                                                    overflow = TextOverflow.Ellipsis
+                                                )
+                                                Text(
+                                                    text = "Brgy. ${fav.barangay}",
+                                                    style = MaterialTheme.typography.labelSmall,
+                                                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                                    maxLines = 1,
+                                                    overflow = TextOverflow.Ellipsis
+                                                )
+                                            }
+                                            IconButton(
+                                                onClick = { onToggleFavorite(fav) },
+                                                modifier = Modifier.minimumInteractiveComponentSize()
+                                            ) {
+                                                Icon(
+                                                    imageVector = Icons.Default.Favorite,
+                                                    contentDescription = "Remove favorite",
+                                                    tint = Color(0xFFE11D48),
+                                                    modifier = Modifier.size(18.dp)
+                                                )
+                                            }
+                                        }
+                                    }
+                                }
+                            }
                         }
                     }
                 }
@@ -280,7 +374,7 @@ fun CommunityReviewsScreen(
                                 modifier = Modifier.fillMaxWidth().padding(24.dp),
                                 horizontalAlignment = Alignment.CenterHorizontally
                             ) {
-                                Icon(Icons.Default.Star, contentDescription = null, tint = Color(0xFFFFB300), modifier = Modifier.size(34.dp))
+                                Icon(Icons.Default.Star, contentDescription = null, tint = MapRatingGold, modifier = Modifier.size(34.dp))
                                 Spacer(modifier = Modifier.height(6.dp))
                                 Text("Be the first to share a tip!", style = MaterialTheme.typography.titleMedium)
                                 Text(
@@ -293,11 +387,13 @@ fun CommunityReviewsScreen(
                     }
                 } else {
                     items(filtered, key = { it.id }) { review ->
+                        val linkedAttraction = attractions.firstOrNull { it.id == review.attractionId }
                         ReviewCard(
                             review = review,
                             isOwner = review.userId == currentUserId,
                             onEdit = { editingReview = review },
-                            onDelete = { onDeleteReview(review.id) }
+                            onDelete = { onDeleteReview(review.id) },
+                            onAttractionClick = linkedAttraction?.let { target -> { onOpenAttraction(target) } }
                         )
                     }
                 }
@@ -332,163 +428,4 @@ fun CommunityReviewsScreen(
             )
         }
     }
-}
-
-@Composable
-private fun ReviewCard(
-    review: CommunityReview,
-    isOwner: Boolean,
-    onEdit: () -> Unit,
-    onDelete: () -> Unit
-) {
-    val locale = Locale.getDefault()
-    val dateFmt = remember(locale) { SimpleDateFormat("MMM d, yyyy", locale) }
-    val dateText = review.createdAt?.toDate()?.let { dateFmt.format(it) } ?: "Just now"
-
-    Card(
-        shape = RoundedCornerShape(18.dp),
-        border = androidx.compose.foundation.BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant),
-        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface)
-    ) {
-        Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
-            Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(10.dp)) {
-                Column(Modifier.weight(1f)) {
-                    Text(review.attractionName, style = MaterialTheme.typography.titleLarge)
-                    Text("${review.authorName} · $dateText", style = MaterialTheme.typography.bodySmall,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant)
-                }
-                Surface(color = MaterialTheme.colorScheme.secondaryContainer, shape = RoundedCornerShape(10.dp)) {
-                    Row(Modifier.padding(8.dp), verticalAlignment = Alignment.CenterVertically) {
-                        Icon(Icons.Default.Star, contentDescription = "Rating out of five", modifier = Modifier.size(18.dp))
-                        Spacer(Modifier.width(4.dp))
-                        Text("${review.rating}/5", style = MaterialTheme.typography.labelLarge)
-                    }
-                }
-            }
-            if (review.visitTag.isNotBlank()) {
-                Text(review.visitTag, style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.primary)
-            }
-            Text(review.comment, style = MaterialTheme.typography.bodyMedium)
-
-            if (isOwner) {
-                @OptIn(ExperimentalLayoutApi::class)
-                FlowRow(
-                    modifier = Modifier.fillMaxWidth(),
-                    horizontalArrangement = Arrangement.spacedBy(8.dp, Alignment.End),
-                    verticalArrangement = Arrangement.spacedBy(4.dp)
-                ) {
-                    TextButton(
-                        onClick = onEdit,
-                        modifier = Modifier.heightIn(min = 48.dp)
-                    ) {
-                        Icon(Icons.Default.Edit, contentDescription = null, modifier = Modifier.size(15.dp))
-                        Spacer(modifier = Modifier.width(4.dp))
-                        Text("Edit", maxLines = 1, overflow = TextOverflow.Ellipsis)
-                    }
-                    TextButton(
-                        onClick = onDelete,
-                        modifier = Modifier.heightIn(min = 48.dp)
-                    ) {
-                        Icon(Icons.Default.Delete, contentDescription = null, modifier = Modifier.size(15.dp))
-                        Spacer(modifier = Modifier.width(4.dp))
-                        Text("Delete", maxLines = 1, overflow = TextOverflow.Ellipsis)
-                    }
-                }
-            }
-        }
-    }
-}
-
-@Composable
-private fun ComposeReviewDialog(
-    language: AppLanguage,
-    attractions: List<Attraction>,
-    initialReview: CommunityReview?,
-    onDismiss: () -> Unit,
-    onSave: (Attraction, Int, String, String) -> Unit
-) {
-    var selectedAttraction by remember(attractions, initialReview) {
-        mutableStateOf(
-            attractions.firstOrNull { it.id == initialReview?.attractionId } ?: attractions.first()
-        )
-    }
-    var rating by remember { mutableIntStateOf((initialReview?.rating ?: 5L).toInt().coerceIn(1, 5)) }
-    var comment by remember { mutableStateOf(initialReview?.comment ?: "") }
-    var visitTag by remember { mutableStateOf(initialReview?.visitTag ?: "Eco-Tour") }
-    val tags = listOf("Eco-Tour", "Family", "Solo", "Hiker", "Foodie")
-
-    AlertDialog(
-        onDismissRequest = onDismiss,
-        title = { Text(if (initialReview == null) "Write Community Review" else "Edit Review") },
-        text = {
-            Column(
-                modifier = Modifier.verticalScroll(rememberScrollState()),
-                verticalArrangement = Arrangement.spacedBy(10.dp)
-            ) {
-                if (initialReview == null) {
-                    Text("Attraction", style = MaterialTheme.typography.labelMedium)
-                    LazyRow(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-                        items(attractions) { attr ->
-                            FilterChip(
-                                selected = attr.id == selectedAttraction.id,
-                                onClick = { selectedAttraction = attr },
-                                label = { Text(attr.name.get(language).split(" ").take(2).joinToString(" ")) }
-                            )
-                        }
-                    }
-                }
-
-                Text("Rating", style = MaterialTheme.typography.labelMedium)
-                Row(horizontalArrangement = Arrangement.spacedBy(4.dp)) {
-                    for (s in 1..5) {
-                        Icon(
-                            imageVector = if (s <= rating) Icons.Default.Star else Icons.Default.StarBorder,
-                            contentDescription = "Rate $s stars",
-                            tint = Color(0xFFFFB300),
-                            modifier = Modifier
-                                .size(36.dp)
-                                .clickable { rating = s }
-                        )
-                    }
-                }
-
-                Text("Trip Type", style = MaterialTheme.typography.labelMedium)
-                LazyRow(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-                    items(tags) { tag ->
-                        FilterChip(
-                            selected = visitTag == tag,
-                            onClick = { visitTag = tag },
-                            label = { Text(tag) }
-                        )
-                    }
-                }
-
-                OutlinedTextField(
-                    value = comment,
-                    onValueChange = { comment = it.take(800) },
-                    label = { Text("Share tips, trail status, or highlights (min 3 chars)") },
-                    minLines = 3,
-                    maxLines = 5,
-                    modifier = Modifier.fillMaxWidth()
-                )
-            }
-        },
-        confirmButton = {
-            Button(
-                onClick = { onSave(selectedAttraction, rating, comment, visitTag) },
-                enabled = comment.trim().length >= 3,
-                modifier = Modifier.heightIn(min = 48.dp)
-            ) {
-                Text("Publish", maxLines = 1, overflow = TextOverflow.Ellipsis)
-            }
-        },
-        dismissButton = {
-            TextButton(
-                onClick = onDismiss,
-                modifier = Modifier.heightIn(min = 48.dp)
-            ) {
-                Text("Cancel", maxLines = 1, overflow = TextOverflow.Ellipsis)
-            }
-        }
-    )
 }

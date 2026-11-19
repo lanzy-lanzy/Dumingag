@@ -643,3 +643,83 @@ test("Only operator-approved verified addresses have management access", async (
   await assertFails(directory(google));
   await assertFails(directory(password));
 });
+
+test("User favorites & review star ratings: owner bookmarking works, oversized/non-list/cross-user fail, and rating 1..5 enforced", async () => {
+  const aliceDb = testEnv.authenticatedContext(ALICE_UID).firestore();
+  const bobDb = testEnv.authenticatedContext(BOB_UID).firestore();
+  const now = new Date(Date.now() - 5000);
+
+  await assertSucceeds(
+    aliceDb.collection("users").doc(ALICE_UID).set({
+      userId: ALICE_UID,
+      displayName: "Alice",
+      favoriteAttractionIds: ["danlugan_falls"],
+      preferredLanguage: "en",
+      offlinePackEnabled: false,
+      createdAt: now,
+      updatedAt: now,
+    })
+  );
+
+  // Update favorites list
+  await assertSucceeds(
+    aliceDb.collection("users").doc(ALICE_UID).update({
+      favoriteAttractionIds: ["danlugan_falls", "organic_village"],
+      updatedAt: new Date(Date.now() - 1000),
+    })
+  );
+
+  // Oversized favorites (> 100 items) and non-list rejected
+  const oversized = Array.from({ length: 101 }, (_, i) => `spot_${i}`);
+  await assertFails(
+    aliceDb.collection("users").doc(ALICE_UID).update({
+      favoriteAttractionIds: oversized,
+      updatedAt: new Date(Date.now() - 1000),
+    })
+  );
+  await assertFails(
+    aliceDb.collection("users").doc(ALICE_UID).update({
+      favoriteAttractionIds: "not_a_list",
+      updatedAt: new Date(Date.now() - 1000),
+    })
+  );
+
+  // Cross-user favorite mutation denied
+  await assertFails(
+    bobDb.collection("users").doc(ALICE_UID).update({
+      favoriteAttractionIds: ["hijack"],
+      updatedAt: new Date(Date.now() - 1000),
+    })
+  );
+
+  // Review rating outside 1..5 rejected
+  await assertFails(
+    aliceDb.collection("reviews").doc("bad_rating_0").set({
+      userId: ALICE_UID,
+      authorName: "Alice",
+      attractionId: "danlugan_falls",
+      attractionName: "Danlugan Highland Falls",
+      rating: 0,
+      comment: "Invalid zero star rating",
+      visitTag: "Solo",
+      visibility: "public",
+      createdAt: now,
+      updatedAt: now,
+    })
+  );
+  await assertFails(
+    aliceDb.collection("reviews").doc("bad_rating_6").set({
+      userId: ALICE_UID,
+      authorName: "Alice",
+      attractionId: "danlugan_falls",
+      attractionName: "Danlugan Highland Falls",
+      rating: 6,
+      comment: "Invalid six star rating",
+      visitTag: "Solo",
+      visibility: "public",
+      createdAt: now,
+      updatedAt: now,
+    })
+  );
+});
+

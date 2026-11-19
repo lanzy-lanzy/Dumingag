@@ -27,6 +27,8 @@ import androidx.compose.material.icons.filled.CalendarMonth
 import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.Directions
 import androidx.compose.material.icons.filled.DirectionsBus
+import androidx.compose.material.icons.filled.Favorite
+import androidx.compose.material.icons.filled.FavoriteBorder
 import androidx.compose.material.icons.filled.HistoryEdu
 import androidx.compose.material.icons.filled.LocationOn
 import androidx.compose.material.icons.filled.Paid
@@ -73,9 +75,11 @@ fun AttractionDetailSheet(
     attraction: Attraction,
     language: AppLanguage,
     isSavedOffline: Boolean,
+    isFavorite: Boolean = false,
     onDismiss: () -> Unit,
     onNavigateOffline: (Attraction) -> Unit,
     onToggleSaveOffline: (Attraction) -> Unit,
+    onToggleFavorite: (Attraction) -> Unit = {},
     onAddToItinerary: (Attraction, Long, String, Boolean) -> Unit
 ) {
     val sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)
@@ -106,18 +110,39 @@ fun AttractionDetailSheet(
                     modifier = Modifier.matchParentSize(),
                     contentScale = ContentScale.Crop
                 )
-                Surface(
-                    color = MaterialTheme.colorScheme.surface.copy(alpha = 0.85f),
-                    shape = RoundedCornerShape(50),
+                Row(
                     modifier = Modifier
                         .align(Alignment.TopEnd)
-                        .padding(10.dp)
+                        .padding(10.dp),
+                    horizontalArrangement = Arrangement.spacedBy(8.dp)
                 ) {
-                    IconButton(
-                        onClick = onDismiss,
-                        modifier = Modifier.minimumInteractiveComponentSize()
+                    Surface(
+                        color = MaterialTheme.colorScheme.surface.copy(alpha = 0.85f),
+                        shape = RoundedCornerShape(50)
                     ) {
-                        Icon(Icons.Default.Close, contentDescription = "Close detail")
+                        IconButton(
+                            onClick = { onToggleFavorite(attraction) },
+                            modifier = Modifier
+                                .minimumInteractiveComponentSize()
+                                .testTag("sheet_favorite_${attraction.id}")
+                        ) {
+                            Icon(
+                                imageVector = if (isFavorite) Icons.Default.Favorite else Icons.Default.FavoriteBorder,
+                                contentDescription = if (isFavorite) "Remove from favorites" else "Add to favorites",
+                                tint = if (isFavorite) androidx.compose.ui.graphics.Color(0xFFE11D48) else MaterialTheme.colorScheme.primary
+                            )
+                        }
+                    }
+                    Surface(
+                        color = MaterialTheme.colorScheme.surface.copy(alpha = 0.85f),
+                        shape = RoundedCornerShape(50)
+                    ) {
+                        IconButton(
+                            onClick = onDismiss,
+                            modifier = Modifier.minimumInteractiveComponentSize()
+                        ) {
+                            Icon(Icons.Default.Close, contentDescription = "Close detail")
+                        }
                     }
                 }
             }

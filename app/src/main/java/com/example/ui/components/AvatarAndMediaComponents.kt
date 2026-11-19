@@ -291,6 +291,10 @@ fun EditProfileDialog(
     initialPhotoData: String,
     email: String,
     isAdmin: Boolean,
+    favoriteAttractions: List<Attraction> = emptyList(),
+    language: com.example.model.AppLanguage = com.example.model.AppLanguage.EN,
+    onOpenAttraction: (Attraction) -> Unit = {},
+    onRemoveFavorite: (Attraction) -> Unit = {},
     onDismiss: () -> Unit,
     onSave: (name: String, photoData: String?, clearPhoto: Boolean) -> Unit
 ) {
@@ -323,7 +327,7 @@ fun EditProfileDialog(
         onDismissRequest = onDismiss,
         title = {
             Text(
-                text = "Edit Traveler Profile",
+                text = "Traveler Profile & Favorites",
                 style = MaterialTheme.typography.titleLarge
             )
         },
@@ -400,7 +404,7 @@ fun EditProfileDialog(
                             Spacer(modifier = Modifier.width(8.dp))
                             Column(modifier = Modifier.weight(1f)) {
                                 Text(
-                                    text = if (isAdmin) "Verified Admin Account" else "Verified Google Traveler",
+                                    text = if (isAdmin) "Verified Admin Account" else "Verified Traveler",
                                     style = MaterialTheme.typography.labelSmall,
                                     fontWeight = FontWeight.Bold,
                                     color = MaterialTheme.colorScheme.onSurface
@@ -426,6 +430,41 @@ fun EditProfileDialog(
                         .fillMaxWidth()
                         .testTag("edit_profile_name_input")
                 )
+
+                Column(
+                    modifier = Modifier.fillMaxWidth(),
+                    verticalArrangement = Arrangement.spacedBy(8.dp)
+                ) {
+                    Text(
+                        text = "Saved Favorites (${favoriteAttractions.size})",
+                        style = MaterialTheme.typography.labelLarge,
+                        color = MaterialTheme.colorScheme.primary,
+                        fontWeight = FontWeight.Bold
+                    )
+                    if (favoriteAttractions.isEmpty()) {
+                        Surface(
+                            color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f),
+                            shape = RoundedCornerShape(12.dp),
+                            modifier = Modifier.fillMaxWidth()
+                        ) {
+                            Text(
+                                text = "Tap the heart icon on any Dumingag spot to bookmark it here for quick access.",
+                                style = MaterialTheme.typography.bodySmall,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                modifier = Modifier.padding(12.dp)
+                            )
+                        }
+                    } else {
+                        favoriteAttractions.forEach { attraction ->
+                            FavoriteQuickAccessRow(
+                                attraction = attraction,
+                                language = language,
+                                onOpenAttraction = { onOpenAttraction(attraction) },
+                                onRemoveFavorite = { onRemoveFavorite(attraction) }
+                            )
+                        }
+                    }
+                }
 
                 validationError?.let { err ->
                     Text(

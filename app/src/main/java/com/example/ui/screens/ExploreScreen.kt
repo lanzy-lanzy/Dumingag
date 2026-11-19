@@ -30,6 +30,8 @@ import androidx.compose.material.icons.filled.Clear
 import androidx.compose.material.icons.filled.CloudDone
 import androidx.compose.material.icons.filled.CloudOff
 import androidx.compose.material.icons.filled.Directions
+import androidx.compose.material.icons.filled.Favorite
+import androidx.compose.material.icons.filled.FavoriteBorder
 import androidx.compose.material.icons.filled.LocationOn
 import androidx.compose.material.icons.filled.Search
 import androidx.compose.material.icons.filled.Star
@@ -75,10 +77,14 @@ fun ExploreScreen(
     selectedCategory: AttractionCategory,
     attractions: List<Attraction>,
     savedIds: Set<String>,
+    favoriteIds: Set<String> = emptySet(),
+    showFavoritesOnly: Boolean = false,
     weatherState: UiState<WeatherSnapshot>,
     isEffectiveOffline: Boolean,
     onSearchChange: (String) -> Unit,
     onCategorySelected: (AttractionCategory) -> Unit,
+    onToggleFavoritesOnly: () -> Unit = {},
+    onToggleFavorite: (Attraction) -> Unit = {},
     onRefreshWeather: () -> Unit,
     onAttractionClick: (Attraction) -> Unit,
     onNavigateToAttraction: (Attraction) -> Unit,
@@ -143,6 +149,26 @@ fun ExploreScreen(
                 contentPadding = PaddingValues(horizontal = 16.dp),
                 horizontalArrangement = Arrangement.spacedBy(8.dp)
             ) {
+                item {
+                    FilterChip(
+                        selected = showFavoritesOnly,
+                        onClick = onToggleFavoritesOnly,
+                        leadingIcon = {
+                            Icon(
+                                imageVector = if (showFavoritesOnly) Icons.Default.Favorite else Icons.Default.FavoriteBorder,
+                                contentDescription = null,
+                                tint = if (showFavoritesOnly) Color.White else Color(0xFFE11D48),
+                                modifier = Modifier.size(16.dp)
+                            )
+                        },
+                        label = { Text("Favorites (${favoriteIds.size})") },
+                        colors = FilterChipDefaults.filterChipColors(
+                            selectedContainerColor = Color(0xFFE11D48),
+                            selectedLabelColor = Color.White
+                        ),
+                        modifier = Modifier.testTag("favorites_filter_chip")
+                    )
+                }
                 items(AttractionCategory.entries) { category ->
                     val selected = category == selectedCategory
                     FilterChip(
@@ -220,6 +246,7 @@ fun ExploreScreen(
                             onClick = {
                                 onSearchChange("")
                                 onCategorySelected(AttractionCategory.ALL)
+                                if (showFavoritesOnly) onToggleFavoritesOnly()
                             },
                             modifier = Modifier.heightIn(min = 48.dp)
                         ) {
@@ -234,9 +261,11 @@ fun ExploreScreen(
                     attraction = attraction,
                     language = language,
                     isSavedOffline = savedIds.contains(attraction.id),
+                    isFavorite = favoriteIds.contains(attraction.id),
                     onClick = { onAttractionClick(attraction) },
                     onNavigate = { onNavigateToAttraction(attraction) },
                     onToggleSave = { onToggleSaveOffline(attraction) },
+                    onToggleFavorite = { onToggleFavorite(attraction) },
                     modifier = Modifier.padding(horizontal = 16.dp)
                 )
             }
@@ -356,9 +385,11 @@ private fun AttractionGuideCard(
     attraction: Attraction,
     language: AppLanguage,
     isSavedOffline: Boolean,
+    isFavorite: Boolean,
     onClick: () -> Unit,
     onNavigate: () -> Unit,
     onToggleSave: () -> Unit,
+    onToggleFavorite: () -> Unit,
     modifier: Modifier = Modifier
 ) {
     Card(
@@ -409,21 +440,42 @@ private fun AttractionGuideCard(
                             modifier = Modifier.padding(horizontal = 10.dp, vertical = 5.dp)
                         )
                     }
-                    Surface(
-                        color = Color(0xCCFFFFFF),
-                        shape = CircleShape,
-                        modifier = Modifier.size(48.dp)
-                    ) {
-                        IconButton(
-                            onClick = onToggleSave,
-                            modifier = Modifier.minimumInteractiveComponentSize()
+                    Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                        Surface(
+                            color = Color(0xCCFFFFFF),
+                            shape = CircleShape,
+                            modifier = Modifier.size(48.dp)
                         ) {
-                            Icon(
-                                imageVector = if (isSavedOffline) Icons.Default.Bookmark else Icons.Default.BookmarkBorder,
-                                contentDescription = AppStrings.saveOffline(language),
-                                tint = MaterialTheme.colorScheme.primary,
-                                modifier = Modifier.size(20.dp)
-                            )
+                            IconButton(
+                                onClick = onToggleFavorite,
+                                modifier = Modifier
+                                    .minimumInteractiveComponentSize()
+                                    .testTag("favorite_attraction_${attraction.id}")
+                            ) {
+                                Icon(
+                                    imageVector = if (isFavorite) Icons.Default.Favorite else Icons.Default.FavoriteBorder,
+                                    contentDescription = if (isFavorite) "Remove from favorites" else "Add to favorites",
+                                    tint = if (isFavorite) Color(0xFFE11D48) else MaterialTheme.colorScheme.primary,
+                                    modifier = Modifier.size(20.dp)
+                                )
+                            }
+                        }
+                        Surface(
+                            color = Color(0xCCFFFFFF),
+                            shape = CircleShape,
+                            modifier = Modifier.size(48.dp)
+                        ) {
+                            IconButton(
+                                onClick = onToggleSave,
+                                modifier = Modifier.minimumInteractiveComponentSize()
+                            ) {
+                                Icon(
+                                    imageVector = if (isSavedOffline) Icons.Default.Bookmark else Icons.Default.BookmarkBorder,
+                                    contentDescription = AppStrings.saveOffline(language),
+                                    tint = MaterialTheme.colorScheme.primary,
+                                    modifier = Modifier.size(20.dp)
+                                )
+                            }
                         }
                     }
                 }

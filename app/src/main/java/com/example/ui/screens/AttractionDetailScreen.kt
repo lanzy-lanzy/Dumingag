@@ -40,6 +40,8 @@ import androidx.compose.material.icons.filled.ContentCopy
 import androidx.compose.material.icons.filled.Directions
 import androidx.compose.material.icons.filled.DirectionsBus
 import androidx.compose.material.icons.filled.Explore
+import androidx.compose.material.icons.filled.Favorite
+import androidx.compose.material.icons.filled.FavoriteBorder
 import androidx.compose.material.icons.filled.HistoryEdu
 import androidx.compose.material.icons.filled.LocationOn
 import androidx.compose.material.icons.filled.Paid
@@ -79,14 +81,24 @@ import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.example.localization.AppStrings
 import com.example.model.AppLanguage
 import com.example.model.Attraction
+import com.example.model.CommunityReview
 import com.example.model.UiState
 import com.example.ui.components.AttractionCoverImage
+import com.example.ui.components.AttractionReviewsSection
+import com.example.ui.components.ComposeReviewDialog
 import com.example.viewmodel.AttractionDetailViewModel
 
 @Composable
 fun AttractionDetailScreen(
     viewModel: AttractionDetailViewModel,
     language: AppLanguage,
+    isFavorite: Boolean = false,
+    reviews: List<CommunityReview> = emptyList(),
+    currentUserId: String = "",
+    onToggleFavorite: () -> Unit = {},
+    onSubmitReview: (Attraction, Int, String, String) -> Unit = { _, _, _, _ -> },
+    onUpdateReview: (String, Int, String, String) -> Unit = { _, _, _, _ -> },
+    onDeleteReview: (String) -> Unit = {},
     onBackClick: () -> Unit,
     onNavigateOffline: (Attraction) -> Unit,
     onAddToItinerary: (Attraction, Long, String, Boolean) -> Unit,
@@ -151,16 +163,28 @@ fun AttractionDetailScreen(
         }
 
         is UiState.Success -> {
+            val attractionReviews = remember(reviews, state.data.id) {
+                reviews.filter { it.attractionId == state.data.id }
+            }
             AttractionDetailContent(
                 attraction = state.data,
                 language = language,
                 isSavedOffline = isSavedOffline,
+                isFavorite = isFavorite,
+                reviews = attractionReviews,
+                currentUserId = currentUserId,
                 onBackClick = onBackClick,
                 onToggleSaveOffline = viewModel::toggleSavedOffline,
+                onToggleFavorite = onToggleFavorite,
                 onNavigateOffline = { onNavigateOffline(state.data) },
                 onAddToItinerary = { millis, notes, reminder ->
                     onAddToItinerary(state.data, millis, notes, reminder)
                 },
+                onSubmitReview = { rating, comment, tag ->
+                    onSubmitReview(state.data, rating, comment, tag)
+                },
+                onUpdateReview = onUpdateReview,
+                onDeleteReview = onDeleteReview,
                 onShowMessage = onShowMessage
             )
         }
@@ -172,17 +196,32 @@ private fun AttractionDetailContent(
     attraction: Attraction,
     language: AppLanguage,
     isSavedOffline: Boolean,
+    isFavorite: Boolean,
+    reviews: List<CommunityReview>,
+    currentUserId: String,
     onBackClick: () -> Unit,
     onToggleSaveOffline: () -> Unit,
+    onToggleFavorite: () -> Unit,
     onNavigateOffline: () -> Unit,
     onAddToItinerary: (Long, String, Boolean) -> Unit,
+    onSubmitReview: (Int, String, String) -> Unit,
+    onUpdateReview: (String, Int, String, String) -> Unit,
+    onDeleteReview: (String) -> Unit,
     onShowMessage: (String) -> Unit
 ) {
     val context = LocalContext.current
     var showItineraryDialog by remember { mutableStateOf(false) }
+    var showReviewDialog by remember { mutableStateOf(false) }
+    var editingReview by remember { mutableStateOf<CommunityReview?>(null) }
 
     val formattedCoords = "${"%.5f".format(attraction.latitude)}° N, ${"%.5f".format(attraction.longitude)}° E"
     val categoryLabel = AppStrings.categoryLabel(attraction.category, language)
+    val ratingText = if (reviews.isNotEmpty()) {
+        val avg = reviews.map { it.rating }.average()
+        "%.1f (%d)".format(avg, reviews.size)
+    } else {
+        "${attraction.baseRating} / 5.0"
+    }
 
     Column(
         modifier = Modifier
@@ -244,22 +283,43 @@ private fun AttractionDetailContent(
                     }
                 }
 
-                Surface(
-                    color = MaterialTheme.colorScheme.surface.copy(alpha = 0.90f),
-                    shape = CircleShape,
-                    tonalElevation = 4.dp
-                ) {
-                    IconButton(
-                        onClick = onToggleSaveOffline,
-                        modifier = Modifier
-                            .minimumInteractiveComponentSize()
-                            .testTag("detail_top_bookmark_button")
+                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    Surface(
+                        color = MaterialTheme.colorScheme.surface.copy(alpha = 0.90f),
+                        shape = CircleShape,
+                        tonalElevation = 4.dp
                     ) {
-                        Icon(
-                            imageVector = if (isSavedOffline) Icons.Default.Bookmark else Icons.Default.BookmarkBorder,
-                            contentDescription = if (isSavedOffline) AppStrings.savedOffline(language) else AppStrings.saveOffline(language),
-                            tint = MaterialTheme.colorScheme.primary
-                        )
+                        IconButton(
+                            onClick = onToggleFavorite,
+                            modifier = Modifier
+                                .minimumInteractiveComponentSize()
+                                .testTag("detail_favorite_button")
+                        ) {
+                            Icon(
+                                imageVector = if (isFavorite) Icons.Default.Favorite else Icons.Default.FavoriteBorder,
+                                contentDescription = if (isFavorite) "Remove from favorites" else "Add to favorites",
+                                tint = if (isFavorite) Color(0xFFE11D48) else MaterialTheme.colorScheme.primary
+                            )
+                        }
+                    }
+
+                    Surface(
+                        color = MaterialTheme.colorScheme.surface.copy(alpha = 0.90f),
+                        shape = CircleShape,
+                        tonalElevation = 4.dp
+                    ) {
+                        IconButton(
+                            onClick = onToggleSaveOffline,
+                            modifier = Modifier
+                                .minimumInteractiveComponentSize()
+                                .testTag("detail_top_bookmark_button")
+                        ) {
+                            Icon(
+                                imageVector = if (isSavedOffline) Icons.Default.Bookmark else Icons.Default.BookmarkBorder,
+                                contentDescription = if (isSavedOffline) AppStrings.savedOffline(language) else AppStrings.saveOffline(language),
+                                tint = MaterialTheme.colorScheme.primary
+                            )
+                        }
                     }
                 }
             }
@@ -314,7 +374,7 @@ private fun AttractionDetailContent(
                         )
                         Spacer(modifier = Modifier.width(4.dp))
                         Text(
-                            text = "${attraction.baseRating} / 5.0",
+                            text = ratingText,
                             style = MaterialTheme.typography.labelMedium,
                             color = MaterialTheme.colorScheme.onSurface,
                             fontWeight = FontWeight.Bold
@@ -613,6 +673,17 @@ private fun AttractionDetailContent(
                     )
                 }
 
+                HorizontalDivider(color = MaterialTheme.colorScheme.outline.copy(alpha = 0.25f))
+
+                AttractionReviewsSection(
+                    attractionName = attraction.name.get(language),
+                    reviews = reviews,
+                    currentUserId = currentUserId,
+                    onWriteReview = { showReviewDialog = true },
+                    onEditReview = { editingReview = it },
+                    onDeleteReview = onDeleteReview
+                )
+
                 Spacer(modifier = Modifier.height(12.dp))
             }
         }
@@ -626,6 +697,34 @@ private fun AttractionDetailContent(
                 val plannedMillis = System.currentTimeMillis() + daysFromNow * 24L * 60L * 60L * 1000L
                 onAddToItinerary(plannedMillis, notes, reminder)
                 showItineraryDialog = false
+            }
+        )
+    }
+
+    if (showReviewDialog) {
+        ComposeReviewDialog(
+            language = language,
+            attractions = listOf(attraction),
+            initialReview = null,
+            initialAttraction = attraction,
+            onDismiss = { showReviewDialog = false },
+            onSave = { _, rating, comment, tag ->
+                onSubmitReview(rating, comment, tag)
+                showReviewDialog = false
+            }
+        )
+    }
+
+    editingReview?.let { rev ->
+        ComposeReviewDialog(
+            language = language,
+            attractions = listOf(attraction),
+            initialReview = rev,
+            initialAttraction = attraction,
+            onDismiss = { editingReview = null },
+            onSave = { _, rating, comment, tag ->
+                onUpdateReview(rev.id, rating, comment, tag)
+                editingReview = null
             }
         )
     }

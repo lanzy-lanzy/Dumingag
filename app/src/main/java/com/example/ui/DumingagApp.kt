@@ -249,9 +249,13 @@ fun DumingagMainScaffold(
     val forceOfflineMode by viewModel.forceOfflineMode.collectAsStateWithLifecycle()
     val offlinePackReady by viewModel.offlinePackReady.collectAsStateWithLifecycle()
     val savedIds by viewModel.savedAttractionIds.collectAsStateWithLifecycle()
+    val favoriteIds by viewModel.favoriteAttractionIds.collectAsStateWithLifecycle()
+    val favoriteAttractions by viewModel.favoriteAttractions.collectAsStateWithLifecycle()
+    val showFavoritesOnly by viewModel.showFavoritesOnly.collectAsStateWithLifecycle()
     val savedDocs by viewModel.savedDocuments.collectAsStateWithLifecycle()
     val itinerariesState by viewModel.itinerariesState.collectAsStateWithLifecycle()
     val reviewsState by viewModel.reviewsState.collectAsStateWithLifecycle()
+    val publicReviews = (reviewsState as? com.example.model.UiState.Success)?.data.orEmpty()
     val transitState by viewModel.transitState.collectAsStateWithLifecycle()
     val statusMessage by viewModel.statusMessage.collectAsStateWithLifecycle()
 
@@ -450,10 +454,14 @@ fun DumingagMainScaffold(
                                 selectedCategory = selectedCategory,
                                 attractions = attractions,
                                 savedIds = savedIds,
+                                favoriteIds = favoriteIds,
+                                showFavoritesOnly = showFavoritesOnly,
                                 weatherState = weatherState,
                                 isEffectiveOffline = isEffectiveOffline,
                                 onSearchChange = viewModel::setSearchQuery,
                                 onCategorySelected = viewModel::setCategory,
+                                onToggleFavoritesOnly = viewModel::toggleFavoritesOnly,
+                                onToggleFavorite = viewModel::toggleFavoriteAttraction,
                                 onRefreshWeather = viewModel::refreshWeather,
                                 onAttractionClick = { attraction ->
                                     navController.navigate(DumingagRoutes.attractionDetail(attraction.id))
@@ -484,6 +492,8 @@ fun DumingagMainScaffold(
                             AttractionsListScreen(
                                 viewModel = attractionsVm,
                                 language = language,
+                                favoriteIds = favoriteIds,
+                                onToggleFavorite = viewModel::toggleFavoriteAttraction,
                                 onAttractionClick = { attraction ->
                                     navController.navigate(DumingagRoutes.attractionDetail(attraction.id))
                                 },
@@ -517,6 +527,19 @@ fun DumingagMainScaffold(
                             AttractionDetailScreen(
                                 viewModel = detailVm,
                                 language = language,
+                                isFavorite = attractionId in favoriteIds,
+                                reviews = publicReviews,
+                                currentUserId = currentUserId,
+                                onToggleFavorite = {
+                                    val target = allAttractions.firstOrNull { it.id == attractionId }
+                                        ?: (detailVm.uiState.value as? com.example.model.UiState.Success)?.data
+                                    if (target != null) {
+                                        viewModel.toggleFavoriteAttraction(target)
+                                    }
+                                },
+                                onSubmitReview = viewModel::submitReview,
+                                onUpdateReview = viewModel::updateReview,
+                                onDeleteReview = viewModel::deleteReview,
                                 onBackClick = { navController.popBackStack() },
                                 onNavigateOffline = { target ->
                                     viewModel.startOfflineNavigation(target)
@@ -546,7 +569,9 @@ fun DumingagMainScaffold(
                                 offlinePackReady = offlinePackReady,
                                 isEffectiveOffline = isEffectiveOffline,
                                 isFullscreen = isMapFullscreen,
+                                favoriteIds = favoriteIds,
                                 onToggleFullscreen = { isMapFullscreen = it },
+                                onToggleFavorite = viewModel::toggleFavoriteAttraction,
                                 onCategorySelected = viewModel::setCategory,
                                 onSelectAttraction = viewModel::selectAttraction,
                                 onStartNavigation = { viewModel.startOfflineNavigation(it) },
@@ -615,6 +640,7 @@ fun DumingagMainScaffold(
                                 userPhotoData = userProfile?.photoData.orEmpty(),
                                 isAdmin = isAdmin,
                                 attractions = allAttractions,
+                                favoriteAttractions = favoriteAttractions,
                                 reviewsState = reviewsState,
                                 onOpenLanguagePicker = { showLanguageDialog = true },
                                 onEditProfile = { showEditProfileDialog = true },
@@ -622,6 +648,10 @@ fun DumingagMainScaffold(
                                 onSignOut = {
                                     GoogleAuthHelper.signOut(credentialManager, scope)
                                 },
+                                onOpenAttraction = { attraction ->
+                                    navController.navigate(DumingagRoutes.attractionDetail(attraction.id))
+                                },
+                                onToggleFavorite = viewModel::toggleFavoriteAttraction,
                                 onSubmitReview = viewModel::submitReview,
                                 onUpdateReview = viewModel::updateReview,
                                 onVerifyEmail = if (isEmailVerified || userEmail.isBlank()) null else ({
@@ -681,6 +711,13 @@ fun DumingagMainScaffold(
             initialPhotoData = userProfile?.photoData.orEmpty(),
             email = userEmail,
             isAdmin = isAdmin,
+            favoriteAttractions = favoriteAttractions,
+            language = language,
+            onOpenAttraction = { attraction ->
+                showEditProfileDialog = false
+                navController.navigate(DumingagRoutes.attractionDetail(attraction.id))
+            },
+            onRemoveFavorite = viewModel::toggleFavoriteAttraction,
             onDismiss = { showEditProfileDialog = false },
             onSave = { name, photoData, clearPhoto ->
                 viewModel.updateProfile(

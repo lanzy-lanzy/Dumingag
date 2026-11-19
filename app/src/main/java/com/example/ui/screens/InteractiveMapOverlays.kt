@@ -39,6 +39,8 @@ import androidx.compose.material.icons.filled.Directions
 import androidx.compose.material.icons.filled.DirectionsCar
 import androidx.compose.material.icons.filled.ExpandLess
 import androidx.compose.material.icons.filled.ExpandMore
+import androidx.compose.material.icons.filled.Favorite
+import androidx.compose.material.icons.filled.FavoriteBorder
 import androidx.compose.material.icons.filled.Layers
 import androidx.compose.material.icons.filled.LocationOn
 import androidx.compose.material.icons.filled.MenuBook
@@ -502,6 +504,8 @@ fun SelectedPinCard(
     attraction: Attraction,
     userLatLon: Pair<Double, Double>,
     language: AppLanguage,
+    isFavorite: Boolean = false,
+    onToggleFavorite: () -> Unit = {},
     onDismiss: () -> Unit,
     onNavigateOffline: () -> Unit,
     onOpenGuide: () -> Unit,
@@ -553,11 +557,26 @@ fun SelectedPinCard(
                                 modifier = Modifier.padding(horizontal = 8.dp, vertical = 3.dp)
                             )
                         }
-                        IconButton(
-                            onClick = onDismiss,
-                            modifier = Modifier.minimumInteractiveComponentSize()
-                        ) {
-                            Icon(Icons.Default.Close, contentDescription = "Close selected landmark", modifier = Modifier.size(18.dp))
+                        Row(verticalAlignment = Alignment.CenterVertically) {
+                            IconButton(
+                                onClick = onToggleFavorite,
+                                modifier = Modifier
+                                    .minimumInteractiveComponentSize()
+                                    .testTag("map_pin_favorite_${attraction.id}")
+                            ) {
+                                Icon(
+                                    imageVector = if (isFavorite) Icons.Default.Favorite else Icons.Default.FavoriteBorder,
+                                    contentDescription = if (isFavorite) "Remove from favorites" else "Add to favorites",
+                                    tint = if (isFavorite) Color(0xFFE11D48) else MaterialTheme.colorScheme.primary,
+                                    modifier = Modifier.size(20.dp)
+                                )
+                            }
+                            IconButton(
+                                onClick = onDismiss,
+                                modifier = Modifier.minimumInteractiveComponentSize()
+                            ) {
+                                Icon(Icons.Default.Close, contentDescription = "Close selected landmark", modifier = Modifier.size(18.dp))
+                            }
                         }
                     }
 

@@ -54,6 +54,7 @@ class DumingagCloudRepository(
                     val payload = mapOf(
                         "userId" to uid,
                         "displayName" to safeName,
+                        "favoriteAttractionIds" to emptyList<String>(),
                         "preferredLanguage" to "en",
                         "offlinePackEnabled" to false,
                         "createdAt" to FieldValue.serverTimestamp(),
@@ -648,6 +649,7 @@ class DumingagCloudRepository(
                     if (!clearPhoto && !cleanPhoto.isNullOrEmpty()) {
                         put("photoData", cleanPhoto)
                     }
+                    put("favoriteAttractionIds", emptyList<String>())
                     put("preferredLanguage", "en")
                     put("offlinePackEnabled", false)
                     put("createdAt", FieldValue.serverTimestamp())
@@ -680,6 +682,64 @@ class DumingagCloudRepository(
             throw e
         } catch (e: Exception) {
             handleFirestoreError(e, OperationType.UPDATE, docPath)
+            Result.failure(e)
+        }
+    }
+
+    suspend fun toggleFavoriteAttraction(
+        userId: String,
+        attractionId: String,
+        displayNameFallback: String = "Traveler"
+    ): Result<Boolean> {
+        val docPath = "users/$userId"
+        return try {
+            val uid = requireUserId()
+            check(uid == userId) { "Signed-in user mismatch" }
+            val safeAttractionId = attractionId.trim().take(80)
+            require(safeAttractionId.isNotEmpty()) { "Attraction ID cannot be blank." }
+            val safeName = displayNameFallback.trim().ifBlank { "Traveler" }.take(80)
+            val docRef = db.collection("users").document(uid)
+
+            val added = db.runTransaction { transaction ->
+                val existing = transaction.get(docRef)
+                if (!existing.exists()) {
+                    val payload = mapOf(
+                        "userId" to uid,
+                        "displayName" to safeName,
+                        "favoriteAttractionIds" to listOf(safeAttractionId),
+                        "preferredLanguage" to "en",
+                        "offlinePackEnabled" to false,
+                        "createdAt" to FieldValue.serverTimestamp(),
+                        "updatedAt" to FieldValue.serverTimestamp()
+                    )
+                    transaction.set(docRef, payload)
+                    true
+                } else {
+                    val current = (existing.get("favoriteAttractionIds") as? List<*>)
+                        ?.filterIsInstance<String>()
+                        .orEmpty()
+                    val existsInFavorites = current.contains(safeAttractionId)
+                    val updated = if (existsInFavorites) {
+                        current.filterNot { it == safeAttractionId }
+                    } else {
+                        require(current.size < 100) { "You can save up to 100 favorite attractions." }
+                        current + safeAttractionId
+                    }
+                    transaction.update(
+                        docRef,
+                        mapOf(
+                            "favoriteAttractionIds" to updated,
+                            "updatedAt" to FieldValue.serverTimestamp()
+                        )
+                    )
+                    !existsInFavorites
+                }
+            }.await()
+            Result.success(added)
+        } catch (e: CancellationException) {
+            throw e
+        } catch (e: Exception) {
+            handleFirestoreError(e, OperationType.WRITE, docPath)
             Result.failure(e)
         }
     }

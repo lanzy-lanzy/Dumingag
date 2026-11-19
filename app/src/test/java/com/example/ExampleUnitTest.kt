@@ -4,16 +4,40 @@ import com.example.model.AttractionCategory
 import com.example.model.AttractionImageMapper
 import com.example.model.CloudAttraction
 import com.example.model.CloudEmergencyContact
+import com.example.model.CommunityReview
+import com.example.model.UserProfile
 import org.junit.Assert.*
 import org.junit.Test
 
 /**
- * Local unit tests for Dumingag Travel Guide domain mappers.
+ * Local unit tests for Dumingag Travel Guide domain mappers and Firestore models.
  */
 class ExampleUnitTest {
   @Test
   fun addition_isCorrect() {
     assertEquals(4, 2 + 2)
+  }
+
+  @Test
+  fun userProfile_defaultsIncludeEmptyFavoritesList() {
+    val profile = UserProfile(userId = "u1", displayName = "Traveler")
+    assertTrue(profile.favoriteAttractionIds.isEmpty())
+    assertEquals("en", profile.preferredLanguage)
+    assertFalse(profile.offlinePackEnabled)
+  }
+
+  @Test
+  fun communityReview_defaultsUsePublicVisibilityAndValidRatingRange() {
+    val review = CommunityReview(
+      userId = "u1",
+      authorName = "Alice",
+      attractionId = "danlugan_falls",
+      attractionName = "Danlugan Highland Falls",
+      rating = 5L,
+      comment = "Scenic trail and refreshing cascade!"
+    )
+    assertEquals("public", review.visibility)
+    assertTrue(review.rating in 1L..5L)
   }
 
   @Test
