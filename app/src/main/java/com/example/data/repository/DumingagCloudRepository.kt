@@ -7,6 +7,8 @@ import com.example.model.ItineraryItem
 import com.example.model.TransitMethod
 import com.example.model.TransitModeCategory
 import com.example.model.TransitServiceStatus
+import com.example.model.ManagedUser
+import com.google.firebase.firestore.MetadataChanges
 import com.example.model.UserProfile
 import com.google.firebase.Firebase
 import com.google.firebase.auth.FirebaseAuth
@@ -36,7 +38,7 @@ class DumingagCloudRepository(
 
     private fun requireUserId(): String {
         return auth.currentUser?.uid
-            ?: throw IllegalStateException("User must be signed in with Google before accessing Firestore.")
+            ?: throw IllegalStateException("User must be signed in before accessing Firestore.")
     }
 
     suspend fun ensureUserProfile(userId: String, displayName: String): Result<Unit> {
@@ -45,19 +47,22 @@ class DumingagCloudRepository(
             val uid = requireUserId()
             check(uid == userId) { "Signed-in user mismatch" }
             val docRef = db.collection("users").document(uid)
-            val existing = docRef.get().await()
-            if (!existing.exists()) {
-                val safeName = displayName.trim().ifBlank { "Traveler" }.take(80)
-                val payload = mapOf(
-                    "userId" to uid,
-                    "displayName" to safeName,
-                    "preferredLanguage" to "en",
-                    "offlinePackEnabled" to false,
-                    "createdAt" to FieldValue.serverTimestamp(),
-                    "updatedAt" to FieldValue.serverTimestamp()
-                )
-                docRef.set(payload).await()
-            }
+            db.runTransaction { transaction ->
+                val existing = transaction.get(docRef)
+                if (!existing.exists()) {
+                    val safeName = displayName.trim().ifBlank { "Traveler" }.take(80)
+                    val payload = mapOf(
+                        "userId" to uid,
+                        "displayName" to safeName,
+                        "preferredLanguage" to "en",
+                        "offlinePackEnabled" to false,
+                        "createdAt" to FieldValue.serverTimestamp(),
+                        "updatedAt" to FieldValue.serverTimestamp()
+                    )
+                    transaction.set(docRef, payload)
+                }
+                Unit
+            }.await()
             Result.success(Unit)
         } catch (e: CancellationException) {
             throw e
@@ -588,10 +593,25 @@ class DumingagCloudRepository(
 
     // --- Profile Editing (Display Name & DP) + Admin Role Verification ---
 
-    fun observeIsAdminDoc(userId: String): Flow<Boolean> = flow {
-        val docRef = db.collection("admins").document(userId)
-        docRef.snapshots()
-            .map { snapshot -> snapshot.exists() }
+    suspend fun loadManagedUsers(): List<ManagedUser> {
+        val profiles = db.collection("users").get(Source.SERVER).await()
+        return profiles.documents.map {
+            ManagedUser(it.id, it.getString("displayName").orEmpty())
+        }.sortedWith(compareBy({ it.displayName.lowercase() }, { it.uid }))
+    }
+
+    fun observeAdminAccess(userId: String, email: String, verified: Boolean): Flow<Boolean> = flow {
+        val address = email.lowercase(java.util.Locale.ROOT)
+        if (!verified || address.isBlank() || '/' in address || auth.currentUser?.uid != userId) {
+            emit(false)
+            return@flow
+        }
+        val docRef = db.collection("admin_emails").document(address)
+        docRef.snapshots(MetadataChanges.INCLUDE)
+            .map { snapshot ->
+                !snapshot.metadata.isFromCache && !snapshot.metadata.hasPendingWrites() &&
+                    snapshot.get("enabled") == true && auth.currentUser?.uid == userId
+            }
             .catch { error ->
                 val firestoreError = generateSequence(error) { it.cause }
                     .filterIsInstance<FirebaseFirestoreException>()

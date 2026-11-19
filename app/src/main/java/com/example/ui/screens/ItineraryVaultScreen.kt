@@ -16,15 +16,14 @@ import androidx.compose.foundation.layout.FlowRow
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
-import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
-import androidx.compose.foundation.lazy.LazyColumn
-import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.lazy.grid.items
+import com.example.R
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
@@ -54,7 +53,6 @@ import androidx.compose.material3.Surface
 import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
-import androidx.compose.material3.minimumInteractiveComponentSize
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
@@ -141,13 +139,99 @@ fun ItineraryVaultScreen(
         }
     }
 
-    LazyColumn(
-        modifier = Modifier.fillMaxSize(),
-        contentPadding = PaddingValues(16.dp),
-        verticalArrangement = Arrangement.spacedBy(14.dp)
-    ) {
+    TravelPageGrid("plan_page") {
+        pageSection {
+            val stops = (itinerariesState as? UiState.Success)?.data?.size
+            TravelPageHeader(
+                AppStrings.navPlan(language),
+                stops?.let { if (it == 1) "1 planned stop" else "$it planned stops" },
+                R.drawable.img_waterfall_falls
+            ) {
+                TravelHeaderAction("Add stop", Icons.Default.Add, "add_itinerary_stop_button") {
+                    showAddItineraryPicker = true
+                }
+            }
+        }
+        when (itinerariesState) {
+            is UiState.Loading -> {
+                pageSection {
+                    Row(
+                        modifier = Modifier.fillMaxWidth().padding(16.dp),
+                        horizontalArrangement = Arrangement.Center
+                    ) {
+                        CircularProgressIndicator()
+                    }
+                }
+            }
+            is UiState.Error -> {
+                pageSection {
+                    Card(colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.errorContainer)) {
+                        Text(
+                            text = itinerariesState.message,
+                            modifier = Modifier.padding(16.dp),
+                            color = MaterialTheme.colorScheme.onErrorContainer
+                        )
+                    }
+                }
+            }
+            is UiState.Success -> {
+                val items = itinerariesState.data
+                if (items.isEmpty()) {
+                    pageSection {
+                        Card(colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface)) {
+                            Column(
+                                modifier = Modifier.fillMaxWidth().padding(20.dp),
+                                horizontalAlignment = Alignment.CenterHorizontally
+                            ) {
+                                Icon(Icons.Default.CalendarMonth, contentDescription = null, tint = MaterialTheme.colorScheme.primary, modifier = Modifier.size(32.dp))
+                                Spacer(modifier = Modifier.height(6.dp))
+                                Text("No stops planned yet", style = MaterialTheme.typography.titleMedium)
+                                Text(
+                                    text = "Add Dumingag landmarks to sync with your device calendar and get offline reminders.",
+                                    style = MaterialTheme.typography.bodySmall,
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                                )
+                            }
+                        }
+                    }
+                } else {
+                    items(items, key = { "stop-${it.id}" }) { stop ->
+                        ItineraryStopCard(
+                            item = stop,
+                            language = language,
+                            onSyncCalendar = {
+                                try {
+                                    val calIntent = TravelAlertManager.createCalendarSyncIntent(stop)
+                                    context.startActivity(calIntent)
+                                    onSyncCalendar(stop)
+                                } catch (_: Exception) {
+                                    onShowMessage("No calendar app available on device")
+                                }
+                            },
+                            onToggleReminder = {
+                                if (!stop.reminderEnabled && Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+                                    val granted = ContextCompat.checkSelfPermission(
+                                        context, Manifest.permission.POST_NOTIFICATIONS
+                                    ) == PackageManager.PERMISSION_GRANTED
+                                    if (!granted) {
+                                        notificationLauncher.launch(Manifest.permission.POST_NOTIFICATIONS)
+                                    }
+                                }
+                                if (!stop.reminderEnabled) {
+                                    TravelAlertManager.scheduleItineraryReminder(context, stop)
+                                    onShowMessage("Reminder scheduled for ${stop.attractionName}")
+                                }
+                                onToggleReminder(stop)
+                            },
+                            onDelete = { onDeleteItinerary(stop.id) }
+                        )
+                    }
+                }
+            }
+        }
+
         // Offline Mode & Map Pack Control Card
-        item {
+        pageSection {
             Text(
                 text = AppStrings.offlineVaultTitle(language),
                 style = MaterialTheme.typography.headlineMedium
@@ -191,7 +275,7 @@ fun ItineraryVaultScreen(
                         horizontalArrangement = Arrangement.SpaceBetween,
                         verticalAlignment = Alignment.CenterVertically
                     ) {
-                        Row(verticalAlignment = Alignment.CenterVertically) {
+                        Row(Modifier.weight(1f), verticalAlignment = Alignment.CenterVertically) {
                             Icon(Icons.Default.CloudOff, contentDescription = null, modifier = Modifier.size(18.dp))
                             Spacer(modifier = Modifier.width(8.dp))
                             Text("Force Offline Mode", style = MaterialTheme.typography.bodyMedium)
@@ -224,115 +308,8 @@ fun ItineraryVaultScreen(
             }
         }
 
-        // Trip Itinerary & Digital Calendar Sync Section
-        item {
-            FlowRow(
-                modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.SpaceBetween,
-                verticalArrangement = Arrangement.spacedBy(8.dp)
-            ) {
-                Text(
-                    text = "Trip Itinerary & Calendar",
-                    style = MaterialTheme.typography.headlineMedium,
-                    modifier = Modifier
-                        .align(Alignment.CenterVertically)
-                        .padding(end = 8.dp)
-                )
-                FilledTonalButton(
-                    onClick = { showAddItineraryPicker = true },
-                    contentPadding = PaddingValues(horizontal = 16.dp, vertical = 10.dp),
-                    modifier = Modifier
-                        .align(Alignment.CenterVertically)
-                        .heightIn(min = 48.dp)
-                        .testTag("add_itinerary_stop_button")
-                ) {
-                    Icon(Icons.Default.Add, contentDescription = null, modifier = Modifier.size(18.dp))
-                    Spacer(modifier = Modifier.width(6.dp))
-                    Text("Add Stop", maxLines = 1, overflow = TextOverflow.Ellipsis)
-                }
-            }
-        }
-
-        when (itinerariesState) {
-            is UiState.Loading -> {
-                item {
-                    Row(
-                        modifier = Modifier.fillMaxWidth().padding(16.dp),
-                        horizontalArrangement = Arrangement.Center
-                    ) {
-                        CircularProgressIndicator()
-                    }
-                }
-            }
-            is UiState.Error -> {
-                item {
-                    Card(colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.errorContainer)) {
-                        Text(
-                            text = itinerariesState.message,
-                            modifier = Modifier.padding(16.dp),
-                            color = MaterialTheme.colorScheme.onErrorContainer
-                        )
-                    }
-                }
-            }
-            is UiState.Success -> {
-                val items = itinerariesState.data
-                if (items.isEmpty()) {
-                    item {
-                        Card(colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface)) {
-                            Column(
-                                modifier = Modifier.fillMaxWidth().padding(20.dp),
-                                horizontalAlignment = Alignment.CenterHorizontally
-                            ) {
-                                Icon(Icons.Default.CalendarMonth, contentDescription = null, tint = MaterialTheme.colorScheme.primary, modifier = Modifier.size(32.dp))
-                                Spacer(modifier = Modifier.height(6.dp))
-                                Text("No stops planned yet", style = MaterialTheme.typography.titleMedium)
-                                Text(
-                                    text = "Add Dumingag landmarks to sync with your device calendar and get offline reminders.",
-                                    style = MaterialTheme.typography.bodySmall,
-                                    color = MaterialTheme.colorScheme.onSurfaceVariant
-                                )
-                            }
-                        }
-                    }
-                } else {
-                    items(items, key = { it.id }) { stop ->
-                        ItineraryStopCard(
-                            item = stop,
-                            language = language,
-                            onSyncCalendar = {
-                                try {
-                                    val calIntent = TravelAlertManager.createCalendarSyncIntent(stop)
-                                    context.startActivity(calIntent)
-                                    onSyncCalendar(stop)
-                                } catch (_: Exception) {
-                                    onShowMessage("No calendar app available on device")
-                                }
-                            },
-                            onToggleReminder = {
-                                if (!stop.reminderEnabled && Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
-                                    val granted = ContextCompat.checkSelfPermission(
-                                        context, Manifest.permission.POST_NOTIFICATIONS
-                                    ) == PackageManager.PERMISSION_GRANTED
-                                    if (!granted) {
-                                        notificationLauncher.launch(Manifest.permission.POST_NOTIFICATIONS)
-                                    }
-                                }
-                                if (!stop.reminderEnabled) {
-                                    TravelAlertManager.scheduleItineraryReminder(context, stop)
-                                    onShowMessage("Reminder scheduled for ${stop.attractionName}")
-                                }
-                                onToggleReminder(stop)
-                            },
-                            onDelete = { onDeleteItinerary(stop.id) }
-                        )
-                    }
-                }
-            }
-        }
-
         // Saved Offline Documents Section
-        item {
+        pageSection {
             Spacer(modifier = Modifier.height(6.dp))
             FlowRow(
                 modifier = Modifier.fillMaxWidth(),
@@ -346,7 +323,7 @@ fun ItineraryVaultScreen(
                         .align(Alignment.CenterVertically)
                         .padding(end = 8.dp)
                 )
-                Row(
+                FlowRow(
                     horizontalArrangement = Arrangement.spacedBy(8.dp),
                     modifier = Modifier.align(Alignment.CenterVertically)
                 ) {
@@ -378,7 +355,7 @@ fun ItineraryVaultScreen(
             }
         }
 
-        items(savedDocuments, key = { it.id }) { doc ->
+        items(savedDocuments, key = { "doc-${it.id}" }) { doc ->
             Card(
                 shape = RoundedCornerShape(16.dp),
                 colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
@@ -573,45 +550,27 @@ private fun ItineraryStopCard(
     onToggleReminder: () -> Unit,
     onDelete: () -> Unit
 ) {
-    val fmt = SimpleDateFormat("EEE, MMM d • hh:mm a", Locale.getDefault())
+    val date = Date(item.plannedDateMillis)
+    val locale = Locale.getDefault()
+    val month = remember(locale) { SimpleDateFormat("MMM", locale) }
+    val day = remember(locale) { SimpleDateFormat("d", locale) }
+    val schedule = remember(locale) { SimpleDateFormat("EEE, MMM d, yyyy · h:mm a", locale) }
     Card(
         shape = RoundedCornerShape(18.dp),
+        border = androidx.compose.foundation.BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant),
         colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface)
     ) {
-        Column(modifier = Modifier.padding(14.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
-            Row(
-                modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.SpaceBetween,
-                verticalAlignment = Alignment.CenterVertically
-            ) {
-                Column(modifier = Modifier.weight(1f)) {
-                    Text(
-                        text = item.attractionName,
-                        style = MaterialTheme.typography.titleMedium,
-                        maxLines = 2,
-                        overflow = TextOverflow.Ellipsis
-                    )
-                    Text(
-                        text = fmt.format(Date(item.plannedDateMillis)),
-                        style = MaterialTheme.typography.labelSmall,
-                        color = MaterialTheme.colorScheme.secondary
-                    )
+        Column(modifier = Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
+            Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+                Surface(shape = RoundedCornerShape(12.dp), color = MaterialTheme.colorScheme.primaryContainer) {
+                    Column(Modifier.padding(horizontal = 12.dp, vertical = 6.dp), horizontalAlignment = Alignment.CenterHorizontally) {
+                        Text(month.format(date), style = MaterialTheme.typography.labelMedium)
+                        Text(day.format(date), style = MaterialTheme.typography.titleLarge)
+                    }
                 }
-                IconButton(
-                    onClick = onToggleReminder,
-                    modifier = Modifier.minimumInteractiveComponentSize()
-                ) {
-                    Icon(
-                        imageVector = if (item.reminderEnabled) Icons.Default.Notifications else Icons.Default.NotificationsOff,
-                        contentDescription = "Toggle reminder",
-                        tint = if (item.reminderEnabled) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant
-                    )
-                }
-                IconButton(
-                    onClick = onDelete,
-                    modifier = Modifier.minimumInteractiveComponentSize()
-                ) {
-                    Icon(Icons.Default.Delete, contentDescription = "Remove stop")
+                Column(Modifier.weight(1f)) {
+                    Text(item.attractionName, style = MaterialTheme.typography.titleLarge)
+                    Text(schedule.format(date), style = MaterialTheme.typography.bodySmall)
                 }
             }
             if (item.notes.isNotBlank()) {
@@ -626,6 +585,11 @@ private fun ItineraryStopCard(
                 horizontalArrangement = Arrangement.SpaceBetween,
                 verticalArrangement = Arrangement.spacedBy(8.dp)
             ) {
+                IconButton(onClick = onToggleReminder) {
+                    Icon(if (item.reminderEnabled) Icons.Default.Notifications else Icons.Default.NotificationsOff,
+                        contentDescription = if (item.reminderEnabled) "Disable reminder" else "Enable reminder")
+                }
+                IconButton(onClick = onDelete) { Icon(Icons.Default.Delete, contentDescription = "Remove stop") }
                 Surface(
                     color = if (item.calendarSynced) MaterialTheme.colorScheme.primaryContainer else MaterialTheme.colorScheme.surfaceVariant,
                     shape = RoundedCornerShape(50),

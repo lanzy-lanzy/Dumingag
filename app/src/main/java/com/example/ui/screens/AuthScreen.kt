@@ -36,7 +36,14 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
-import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.material3.OutlinedTextField
+import androidx.compose.material3.TextButton
+import androidx.compose.foundation.text.KeyboardOptions
+import androidx.compose.ui.text.input.KeyboardType
+import androidx.compose.ui.text.input.PasswordVisualTransformation
+import androidx.compose.runtime.saveable.rememberSaveable
+import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.launch
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -62,24 +69,21 @@ import com.example.ui.components.GoogleBrandIcon
 
 @Composable
 fun AuthScreen(
-    onAuthSuccess: () -> Unit
+    onAuthSuccess: () -> Unit,
+    createAccount: suspend (String, String) -> Unit = GoogleAuthHelper::createAccount,
+    signIn: suspend (String, String) -> Unit = GoogleAuthHelper::signIn
 ) {
     val context = LocalContext.current
     val scope = rememberCoroutineScope()
     val credentialManager = remember(context) { CredentialManager.create(context) }
 
-    var isLoading by remember { mutableStateOf(false) }
+    var pendingMethod by remember { mutableStateOf<String?>(null) }
+    val isLoading = pendingMethod != null
     var errorMessage by remember { mutableStateOf<String?>(null) }
 
-    LaunchedEffect(Unit) {
-        GoogleAuthHelper.attemptAutoSignIn(
-            context = context,
-            credentialManager = credentialManager,
-            onAuthSuccess = onAuthSuccess,
-            onUnauthenticated = {},
-            scope = scope
-        )
-    }
+    var registering by rememberSaveable { mutableStateOf(false) }
+    var email by rememberSaveable { mutableStateOf("") }
+    var password by remember { mutableStateOf("") }
 
     Box(
         modifier = Modifier
@@ -177,6 +181,51 @@ fun AuthScreen(
                     subtitle = "Share verified tips and sync your itinerary with your digital calendar."
                 )
 
+                OutlinedTextField(
+                    value = email, onValueChange = { email = it },
+                    label = { Text("Email") }, singleLine = true, enabled = !isLoading,
+                    keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Email),
+                    modifier = Modifier.fillMaxWidth()
+                )
+                OutlinedTextField(
+                    value = password, onValueChange = { password = it },
+                    label = { Text("Password") }, singleLine = true, enabled = !isLoading,
+                    visualTransformation = PasswordVisualTransformation(),
+                    keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Password),
+                    modifier = Modifier.fillMaxWidth()
+                )
+                Button(
+                    onClick = {
+                        errorMessage = null
+                        pendingMethod = "email"
+                        scope.launch {
+                            try {
+                                if (registering) createAccount(email, password)
+                                else signIn(email, password)
+                                onAuthSuccess()
+                            } catch (e: CancellationException) {
+                                throw e
+                            } catch (e: Exception) {
+                                errorMessage = e.localizedMessage ?: "Authentication failed. Please try again."
+                            } finally {
+                                pendingMethod = null
+                            }
+                        }
+                    },
+                    enabled = !isLoading && email.isNotBlank() && password.isNotEmpty(),
+                    modifier = Modifier.fillMaxWidth()
+                ) { Text(if (pendingMethod == "email") "Please wait…" else if (registering) "Create Account" else "Sign In") }
+                TextButton(
+                    onClick = {
+                        registering = !registering
+                        password = ""
+                        errorMessage = null
+                    },
+                    enabled = !isLoading
+                ) { Text(if (registering) "Already registered? Sign In" else "New here? Create Account") }
+
+                Spacer(modifier = Modifier.height(6.dp))
+
                 if (errorMessage != null) {
                     Card(
                         colors = CardDefaults.cardColors(
@@ -193,26 +242,24 @@ fun AuthScreen(
                     }
                 }
 
-                Spacer(modifier = Modifier.height(6.dp))
-
                 Button(
                     onClick = {
                         errorMessage = null
-                        isLoading = true
+                        pendingMethod = "google"
                         GoogleAuthHelper.onGoogleSignInClicked(
                             context = context,
                             credentialManager = credentialManager,
                             onAuthSuccess = {
-                                isLoading = false
+                                pendingMethod = null
                                 onAuthSuccess()
                             },
                             onAuthError = { msg ->
-                                isLoading = false
+                                pendingMethod = null
                                 errorMessage = msg
                             },
                             scope = scope,
                             onAuthCancelled = {
-                                isLoading = false
+                                pendingMethod = null
                             }
                         )
                     },
@@ -227,7 +274,7 @@ fun AuthScreen(
                         .heightIn(min = 54.dp)
                         .testTag("google_sign_in_button")
                 ) {
-                    if (isLoading) {
+                    if (pendingMethod == "google") {
                         CircularProgressIndicator(
                             modifier = Modifier.size(22.dp),
                             color = MaterialTheme.colorScheme.onPrimary,
@@ -252,7 +299,7 @@ fun AuthScreen(
                     modifier = Modifier.fillMaxWidth()
                 ) {
                     Text(
-                        text = "Uses verified Google Sign-In to protect traveler profiles and admin tools. After signing in, customize your display name and profile photo anytime.",
+                        text = "After signing in, you can customize your traveler profile.",
                         style = MaterialTheme.typography.bodySmall,
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
                         modifier = Modifier.padding(12.dp)

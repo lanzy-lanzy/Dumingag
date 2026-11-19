@@ -104,7 +104,7 @@ fun TravelAlertsCard(
             }
 
             BoxWithConstraints(modifier = Modifier.fillMaxWidth()) {
-                val stackButtons = maxWidth < 340.dp
+                val stackButtons = maxWidth < 340.dp * androidx.compose.ui.platform.LocalDensity.current.fontScale.coerceAtLeast(1f)
                 if (stackButtons) {
                     Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
                         Button(

@@ -186,7 +186,8 @@ data class WeatherSnapshot(
     val isApiKeyMissing: Boolean = false,
     val highTempC: Double = temperatureC,
     val lowTempC: Double = temperatureC,
-    val pressureHpa: Int = 1012
+    val pressureHpa: Int = 1012,
+    val isSample: Boolean = false
 )
 
 data class SavedDocument(
@@ -402,3 +403,5 @@ data class TransitMethod(
 )
 
 
+
+data class ManagedUser(val uid: String, val displayName: String)

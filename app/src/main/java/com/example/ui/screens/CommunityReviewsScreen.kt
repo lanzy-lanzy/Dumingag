@@ -8,14 +8,14 @@ import androidx.compose.foundation.layout.FlowRow
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
-import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
-import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.grid.items
+import com.example.R
 import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.rememberScrollState
@@ -83,19 +83,31 @@ fun CommunityReviewsScreen(
     onSignOut: () -> Unit,
     onSubmitReview: (Attraction, Int, String, String) -> Unit,
     onUpdateReview: (String, Int, String, String) -> Unit,
-    onDeleteReview: (String) -> Unit
+    onDeleteReview: (String) -> Unit,
+    onVerifyEmail: (() -> Unit)? = null
 ) {
     var filterAttractionId by remember { mutableStateOf<String?>(null) }
     var showComposeDialog by remember { mutableStateOf(false) }
     var editingReview by remember { mutableStateOf<CommunityReview?>(null) }
 
-    LazyColumn(
-        modifier = Modifier.fillMaxSize(),
-        contentPadding = PaddingValues(16.dp),
-        verticalArrangement = Arrangement.spacedBy(12.dp)
-    ) {
+    TravelPageGrid("reviews_page") {
+        pageSection {
+            val reviews = (reviewsState as? UiState.Success)?.data
+            val summary = reviews?.let {
+                when (it.size) {
+                    0 -> null
+                    1 -> "1 review · ${it.first().rating}/5"
+                    else -> "%d reviews · %.1f/5".format(it.size, it.map { review -> review.rating }.average())
+                }
+            }
+            TravelPageHeader(AppStrings.communityReviewsTitle(language), summary, R.drawable.img_organic_village) {
+                TravelHeaderAction("Write a review", Icons.Default.AddComment, "write_review_button", enabled = attractions.isNotEmpty()) {
+                    showComposeDialog = true
+                }
+            }
+        }
         // Traveler Profile, DP Editor, Admin Console & Sign-Out Card
-        item {
+        pageSection {
             Card(
                 shape = RoundedCornerShape(20.dp),
                 colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface)
@@ -117,8 +129,9 @@ fun CommunityReviewsScreen(
                         )
                         Spacer(modifier = Modifier.width(12.dp))
                         Column(modifier = Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(2.dp)) {
-                            Row(
-                                verticalAlignment = Alignment.CenterVertically,
+                            @OptIn(ExperimentalLayoutApi::class)
+                            FlowRow(
+                                verticalArrangement = Arrangement.Center,
                                 horizontalArrangement = Arrangement.spacedBy(6.dp)
                             ) {
                                 Text(
@@ -157,20 +170,7 @@ fun CommunityReviewsScreen(
                                 color = MaterialTheme.colorScheme.secondary
                             )
                         }
-                        IconButton(
-                            onClick = onOpenLanguagePicker,
-                            modifier = Modifier.minimumInteractiveComponentSize()
-                        ) {
-                            Icon(Icons.Default.Translate, contentDescription = "Change language")
-                        }
-                        IconButton(
-                            onClick = onSignOut,
-                            modifier = Modifier
-                                .minimumInteractiveComponentSize()
-                                .testTag("sign_out_button")
-                        ) {
-                            Icon(Icons.AutoMirrored.Filled.Logout, contentDescription = "Sign out")
-                        }
+
                     }
 
                     @OptIn(ExperimentalLayoutApi::class)
@@ -189,9 +189,12 @@ fun CommunityReviewsScreen(
                         ) {
                             Icon(Icons.Default.Edit, contentDescription = null, modifier = Modifier.size(16.dp))
                             Spacer(modifier = Modifier.width(6.dp))
-                            Text("Edit Profile & DP", maxLines = 1)
+                            Text("Edit profile", maxLines = 1)
                         }
 
+                        onVerifyEmail?.let { verify ->
+                            TextButton(onClick = verify) { Text("Verify email") }
+                        }
                         if (isAdmin) {
                             Button(
                                 onClick = onOpenAdminConsole,
@@ -206,39 +209,26 @@ fun CommunityReviewsScreen(
                                 Text("Admin Console", maxLines = 1)
                             }
                         }
+                        IconButton(
+                            onClick = onOpenLanguagePicker,
+                            modifier = Modifier.minimumInteractiveComponentSize()
+                        ) {
+                            Icon(Icons.Default.Translate, contentDescription = "Change language")
+                        }
+                        IconButton(
+                            onClick = onSignOut,
+                            modifier = Modifier
+                                .minimumInteractiveComponentSize()
+                                .testTag("sign_out_button")
+                        ) {
+                            Icon(Icons.AutoMirrored.Filled.Logout, contentDescription = "Sign out")
+                        }
                     }
                 }
             }
         }
 
-        item {
-            @OptIn(ExperimentalLayoutApi::class)
-            FlowRow(
-                modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.SpaceBetween,
-                verticalArrangement = Arrangement.spacedBy(8.dp)
-            ) {
-                Text(
-                    text = AppStrings.communityReviewsTitle(language),
-                    style = MaterialTheme.typography.headlineMedium,
-                    modifier = Modifier.align(Alignment.CenterVertically)
-                )
-                Button(
-                    onClick = { showComposeDialog = true },
-                    contentPadding = PaddingValues(horizontal = 16.dp, vertical = 10.dp),
-                    modifier = Modifier
-                        .align(Alignment.CenterVertically)
-                        .heightIn(min = 48.dp)
-                        .testTag("write_review_button")
-                ) {
-                    Icon(Icons.Default.AddComment, contentDescription = null, modifier = Modifier.size(16.dp))
-                    Spacer(modifier = Modifier.width(6.dp))
-                    Text("Review", maxLines = 1, overflow = TextOverflow.Ellipsis)
-                }
-            }
-        }
-
-        item {
+        pageSection {
             LazyRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                 item {
                     FilterChip(
@@ -251,7 +241,7 @@ fun CommunityReviewsScreen(
                     FilterChip(
                         selected = filterAttractionId == attraction.id,
                         onClick = { filterAttractionId = attraction.id },
-                        label = { Text(attraction.name.get(language).split(" ").take(2).joinToString(" ")) }
+                        label = { Text(attraction.name.get(language)) }
                     )
                 }
             }
@@ -259,7 +249,7 @@ fun CommunityReviewsScreen(
 
         when (reviewsState) {
             is UiState.Loading -> {
-                item {
+                pageSection {
                     Row(
                         modifier = Modifier.fillMaxWidth().padding(24.dp),
                         horizontalArrangement = Arrangement.Center
@@ -269,7 +259,7 @@ fun CommunityReviewsScreen(
                 }
             }
             is UiState.Error -> {
-                item {
+                pageSection {
                     Card(colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.errorContainer)) {
                         Text(
                             text = reviewsState.message,
@@ -284,7 +274,7 @@ fun CommunityReviewsScreen(
                     filterAttractionId == null || it.attractionId == filterAttractionId
                 }
                 if (filtered.isEmpty()) {
-                    item {
+                    pageSection {
                         Card(colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface)) {
                             Column(
                                 modifier = Modifier.fillMaxWidth().padding(24.dp),
@@ -351,47 +341,33 @@ private fun ReviewCard(
     onEdit: () -> Unit,
     onDelete: () -> Unit
 ) {
-    val dateFmt = SimpleDateFormat("MMM d, yyyy", Locale.getDefault())
+    val locale = Locale.getDefault()
+    val dateFmt = remember(locale) { SimpleDateFormat("MMM d, yyyy", locale) }
     val dateText = review.createdAt?.toDate()?.let { dateFmt.format(it) } ?: "Just now"
 
     Card(
         shape = RoundedCornerShape(18.dp),
+        border = androidx.compose.foundation.BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant),
         colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface)
     ) {
-        Column(modifier = Modifier.padding(14.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
-            Row(
-                modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.SpaceBetween,
-                verticalAlignment = Alignment.CenterVertically
-            ) {
-                Column(modifier = Modifier.weight(1f)) {
-                    Text(review.attractionName, style = MaterialTheme.typography.titleSmall, color = MaterialTheme.colorScheme.primary)
-                    Text("${review.authorName} • $dateText", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+        Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
+            Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+                Column(Modifier.weight(1f)) {
+                    Text(review.attractionName, style = MaterialTheme.typography.titleLarge)
+                    Text("${review.authorName} · $dateText", style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant)
                 }
-                Surface(
-                    color = MaterialTheme.colorScheme.secondaryContainer,
-                    shape = RoundedCornerShape(50)
-                ) {
-                    Text(
-                        text = review.visitTag,
-                        style = MaterialTheme.typography.labelSmall,
-                        color = MaterialTheme.colorScheme.onSecondaryContainer,
-                        modifier = Modifier.padding(horizontal = 8.dp, vertical = 3.dp)
-                    )
+                Surface(color = MaterialTheme.colorScheme.secondaryContainer, shape = RoundedCornerShape(10.dp)) {
+                    Row(Modifier.padding(8.dp), verticalAlignment = Alignment.CenterVertically) {
+                        Icon(Icons.Default.Star, contentDescription = "Rating out of five", modifier = Modifier.size(18.dp))
+                        Spacer(Modifier.width(4.dp))
+                        Text("${review.rating}/5", style = MaterialTheme.typography.labelLarge)
+                    }
                 }
             }
-
-            Row(verticalAlignment = Alignment.CenterVertically) {
-                for (star in 1..5) {
-                    Icon(
-                        imageVector = if (star <= review.rating) Icons.Default.Star else Icons.Default.StarBorder,
-                        contentDescription = null,
-                        tint = Color(0xFFFFB300),
-                        modifier = Modifier.size(18.dp)
-                    )
-                }
+            if (review.visitTag.isNotBlank()) {
+                Text(review.visitTag, style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.primary)
             }
-
             Text(review.comment, style = MaterialTheme.typography.bodyMedium)
 
             if (isOwner) {

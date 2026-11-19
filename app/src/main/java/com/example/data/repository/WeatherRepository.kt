@@ -183,7 +183,7 @@ class WeatherRepository(
         weatherDao.upsertWeather(entity)
         return entity.toSnapshot(
             isFromCache = false,
-            sourceLabel = "Fallback Forecast",
+            sourceLabel = "Open-Meteo",
             isApiKeyMissing = true,
             highTempC = todayEntry?.tempMaxC ?: (tempC + 2.0),
             lowTempC = todayEntry?.tempMinC ?: (tempC - 4.0),
@@ -375,7 +375,8 @@ class WeatherRepository(
             isApiKeyMissing = isApiKeyMissing,
             highTempC = 31.0,
             lowTempC = 22.5,
-            pressureHpa = 1012
+            pressureHpa = 1012,
+            isSample = true
         )
     }
 

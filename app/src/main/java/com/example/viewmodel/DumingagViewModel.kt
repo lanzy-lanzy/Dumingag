@@ -20,6 +20,7 @@ import com.example.model.SavedDocument
 import com.example.model.TransitMethod
 import com.example.model.TravelMode
 import com.example.model.UiState
+import com.example.model.ManagedUser
 import com.example.model.UserProfile
 import com.example.model.WeatherSnapshot
 import com.google.firebase.firestore.FirebaseFirestoreException
@@ -45,9 +46,6 @@ class DumingagViewModel(
     val userEmail: String = "",
     val isEmailVerified: Boolean = false
 ) : ViewModel() {
-
-    private val isBootstrappedAdmin: Boolean =
-        userEmail.equals(ADMIN_EMAIL, ignoreCase = true) && isEmailVerified
 
     private val _searchQuery = MutableStateFlow("")
     val searchQuery: StateFlow<String> = _searchQuery.asStateFlow()
@@ -80,9 +78,8 @@ class DumingagViewModel(
     private var hasAttemptedAttractionSeed = false
     private var hasAttemptedEmergencySeed = false
 
-    val isAdmin: StateFlow<Boolean> = cloudRepo.observeIsAdminDoc(currentUserId)
-        .map { hasAdminDoc -> isBootstrappedAdmin || hasAdminDoc }
-        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(STOP_TIMEOUT), isBootstrappedAdmin)
+    val isAdmin: StateFlow<Boolean> = cloudRepo.observeAdminAccess(currentUserId, userEmail, isEmailVerified)
+        .stateIn(viewModelScope, SharingStarted.Eagerly, false)
 
     val userProfile: StateFlow<UserProfile?> = cloudRepo.observeUserProfile(currentUserId)
         .catch { error ->
@@ -210,19 +207,17 @@ class DumingagViewModel(
         }
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(STOP_TIMEOUT), UiState.Loading)
 
-    val transitState: StateFlow<UiState<List<TransitMethod>>> = cloudRepo.observePublicTransitMethods()
-        .map<List<TransitMethod>, UiState<List<TransitMethod>>> { list ->
-            if (list.isEmpty() && !hasAttemptedTransitSeed) {
-                hasAttemptedTransitSeed = true
-                viewModelScope.launch {
-                    cloudRepo.seedDefaultTransitMethodsIfEmpty(
-                        userId = currentUserId,
-                        defaults = DumingagSeedData.defaultTransitMethods
-                    )
-                }
+    val transitState: StateFlow<UiState<List<TransitMethod>>> = combine<List<TransitMethod>, Boolean, UiState<List<TransitMethod>>>(
+        cloudRepo.observePublicTransitMethods(), isAdmin
+    ) { list, admin ->
+        if (admin && list.isEmpty() && !hasAttemptedTransitSeed) {
+            hasAttemptedTransitSeed = true
+            viewModelScope.launch {
+                cloudRepo.seedDefaultTransitMethodsIfEmpty(currentUserId, DumingagSeedData.defaultTransitMethods)
             }
-            UiState.Success(list)
         }
+        UiState.Success(list)
+    }
         .catch { error ->
             val firestoreError = generateSequence(error) { it.cause }
                 .filterIsInstance<FirebaseFirestoreException>()
@@ -235,9 +230,13 @@ class DumingagViewModel(
 
     init {
         viewModelScope.launch {
+            cloudRepo.ensureUserProfile(currentUserId, userDisplayName).onFailure {
+                _statusMessage.value = "Unable to initialize your traveler profile: ${it.localizedMessage}"
+            }
+        }
+        viewModelScope.launch {
             attractionRepo.seedAttractionsIfEmpty()
             offlineRepo.seedStarterDocumentsIfNeeded()
-            cloudRepo.ensureUserProfile(currentUserId, userDisplayName)
             refreshWeather()
         }
         viewModelScope.launch {
@@ -290,6 +289,11 @@ class DumingagViewModel(
             offlineRepo.setLanguage(lang)
             cloudRepo.updateUserPreferences(currentUserId, lang.code, offlinePackReady.value)
         }
+    }
+
+    suspend fun loadManagedUsers(): List<ManagedUser> {
+        check(isAdmin.value) { "Admin access required" }
+        return cloudRepo.loadManagedUsers()
     }
 
     fun updateProfile(displayName: String, photoData: String?, clearPhoto: Boolean = false) {
@@ -623,7 +627,7 @@ class DumingagViewModel(
         viewModelScope.launch {
             val res = cloudRepo.refreshTransitMethodsFromServer()
             res.onSuccess { list ->
-                if (list.isEmpty()) {
+                if (isAdmin.value && list.isEmpty()) {
                     cloudRepo.seedDefaultTransitMethodsIfEmpty(
                         userId = currentUserId,
                         defaults = DumingagSeedData.defaultTransitMethods
@@ -648,6 +652,10 @@ class DumingagViewModel(
         travelTip: String,
         serviceStatus: String
     ) {
+        if (!isAdmin.value) {
+            _statusMessage.value = "Admin authorization required"
+            return
+        }
         viewModelScope.launch {
             val res = cloudRepo.addTransitMethod(
                 userId = currentUserId,
@@ -683,6 +691,10 @@ class DumingagViewModel(
         travelTip: String,
         serviceStatus: String
     ) {
+        if (!isAdmin.value) {
+            _statusMessage.value = "Admin authorization required"
+            return
+        }
         viewModelScope.launch {
             val res = cloudRepo.updateTransitMethod(
                 userId = currentUserId,
@@ -707,6 +719,10 @@ class DumingagViewModel(
     }
 
     fun deleteTransitMethod(transitId: String) {
+        if (!isAdmin.value) {
+            _statusMessage.value = "Admin authorization required"
+            return
+        }
         viewModelScope.launch {
             val res = cloudRepo.deleteTransitMethod(currentUserId, transitId)
             res.onSuccess {
@@ -728,7 +744,6 @@ class DumingagViewModel(
     private companion object {
         const val TAG = "DumingagVM"
         const val STOP_TIMEOUT = 5000L
-        const val ADMIN_EMAIL = "bigbren480@gmail.com"
     }
 }
 

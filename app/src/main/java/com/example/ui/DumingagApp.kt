@@ -67,6 +67,8 @@ import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.credentials.CredentialManager
+import androidx.lifecycle.ViewModelStore
+import androidx.lifecycle.ViewModelStoreOwner
 import androidx.lifecycle.ViewModelProvider.AndroidViewModelFactory.Companion.APPLICATION_KEY
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.lifecycle.viewmodel.compose.viewModel
@@ -106,6 +108,9 @@ import com.google.firebase.Firebase
 import com.google.firebase.auth.FirebaseAuth
 import com.google.firebase.auth.FirebaseUser
 import com.google.firebase.auth.auth
+import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.launch
+import kotlinx.coroutines.tasks.await
 import kotlinx.coroutines.channels.awaitClose
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.callbackFlow
@@ -140,23 +145,42 @@ private val TopDestinations = listOf(
     NavDestinationItem(DumingagRoutes.REVIEWS, Icons.Default.Forum, AppStrings::navReviews)
 )
 
-internal fun FirebaseAuth.authStateFlow(): Flow<FirebaseUser?> = callbackFlow {
-    val listener = FirebaseAuth.AuthStateListener { auth ->
-        trySend(auth.currentUser)
+private data class SignedInUser(
+    val uid: String, val email: String?, val displayName: String?, val isEmailVerified: Boolean
+)
+
+private fun FirebaseUser.toSessionUser() = SignedInUser(uid, email, displayName, isEmailVerified)
+
+private fun FirebaseAuth.authStateFlow(): Flow<SignedInUser?> = callbackFlow {
+    val listener = FirebaseAuth.IdTokenListener { auth ->
+        trySend(auth.currentUser?.toSessionUser())
     }
-    addAuthStateListener(listener)
-    awaitClose { removeAuthStateListener(listener) }
+    addIdTokenListener(listener)
+    awaitClose { removeIdTokenListener(listener) }
 }
 
 @Composable
-fun AppNavigation(auth: FirebaseAuth = Firebase.auth) {
-    val currentUser by auth.authStateFlow().collectAsStateWithLifecycle(initialValue = auth.currentUser)
+fun AppNavigation() {
+    val context = LocalContext.current
+    val app = remember(context) { com.google.firebase.FirebaseApp.initializeApp(context) }
+    if (app == null) {
+        Box(Modifier.fillMaxSize().padding(24.dp), contentAlignment = Alignment.Center) {
+            Text("Sign-in is unavailable because this build is missing its Firebase configuration.")
+        }
+        return
+    }
+    AppNavigation(Firebase.auth)
+}
+
+@Composable
+fun AppNavigation(auth: FirebaseAuth) {
+    val currentUser by remember(auth) { auth.authStateFlow() }.collectAsStateWithLifecycle(initialValue = auth.currentUser?.toSessionUser())
     val user = currentUser
     if (user == null) {
         AuthScreen(onAuthSuccess = {})
     } else {
         val displayName = user.displayName?.takeIf { it.isNotBlank() } ?: user.email ?: "Dumingag Traveler"
-        key(user.uid) {
+        key(user.uid, user.email, user.isEmailVerified) {
             DumingagMainScaffold(
                 currentUserId = user.uid,
                 userDisplayName = displayName,
@@ -179,11 +203,19 @@ fun DumingagMainScaffold(
     val scope = rememberCoroutineScope()
     val credentialManager = remember(context) { CredentialManager.create(context) }
 
+    val sessionOwner = remember(currentUserId, userEmail, isEmailVerified) {
+        object : ViewModelStoreOwner {
+            override val viewModelStore = ViewModelStore()
+        }
+    }
+    DisposableEffect(sessionOwner) {
+        onDispose { sessionOwner.viewModelStore.clear() }
+    }
     val viewModel: DumingagViewModel = viewModel(
-        key = currentUserId,
+        viewModelStoreOwner = sessionOwner,
         factory = viewModelFactory {
             initializer {
-                val app = checkNotNull(this[APPLICATION_KEY]) as Application
+                val app = context.applicationContext as Application
                 DumingagViewModel(
                     cloudRepo = DumingagCloudRepository(app),
                     offlineRepo = DumingagOfflineRepository(app),
@@ -534,7 +566,6 @@ fun DumingagMainScaffold(
                                 language = language,
                                 transitState = transitState,
                                 emergencyContacts = emergencyContacts,
-                                currentUserId = currentUserId,
                                 isAdmin = isAdmin,
                                 isEffectiveOffline = isEffectiveOffline,
                                 onRefreshTransit = viewModel::refreshTransit,
@@ -593,6 +624,21 @@ fun DumingagMainScaffold(
                                 },
                                 onSubmitReview = viewModel::submitReview,
                                 onUpdateReview = viewModel::updateReview,
+                                onVerifyEmail = if (isEmailVerified || userEmail.isBlank()) null else ({
+                                    scope.launch {
+                                        try {
+                                            val user = Firebase.auth.currentUser
+                                            if (user?.uid == currentUserId) {
+                                                user.sendEmailVerification().await()
+                                                viewModel.postStatusMessage("Check your email, then sign in again after verifying.")
+                                            }
+                                        } catch (e: CancellationException) {
+                                            throw e
+                                        } catch (e: Exception) {
+                                            viewModel.postStatusMessage(e.localizedMessage ?: "Unable to send verification email.")
+                                        }
+                                    }
+                                }),
                                 onDeleteReview = viewModel::deleteReview
                             )
                         }
@@ -611,6 +657,8 @@ fun DumingagMainScaffold(
                                 language = language,
                                 isAdmin = isAdmin,
                                 adminEmail = userEmail,
+                                currentUserId = currentUserId,
+                                loadUsers = viewModel::loadManagedUsers,
                                 attractions = allAttractions,
                                 emergencyContacts = emergencyContacts,
                                 initialTab = initialTab,

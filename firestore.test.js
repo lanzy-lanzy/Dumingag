@@ -241,9 +241,16 @@ test("Community reviews: public query works, owner create/update/delete work, un
   );
 });
 
+async function setAdminEmail(email, enabled = true) {
+  await testEnv.withSecurityRulesDisabled(async (context) => {
+    await context.firestore().collection("admin_emails").doc(email.toLowerCase()).set({ enabled });
+  });
+}
+
 test("Transit methods: unauthenticated denied, filtered public list works, owner create/update/delete work, cross-user & invalid payloads fail", async () => {
   const unauthDb = testEnv.unauthenticatedContext().firestore();
-  const aliceDb = testEnv.authenticatedContext(ALICE_UID).firestore();
+  await setAdminEmail("alice@example.com");
+  const aliceDb = testEnv.authenticatedContext(ALICE_UID, {email: "alice@example.com", email_verified: true}).firestore();
   const bobDb = testEnv.authenticatedContext(BOB_UID).firestore();
   const now = new Date(Date.now() - 5000);
 
@@ -290,8 +297,8 @@ test("Transit methods: unauthenticated denied, filtered public list works, owner
     })
   );
 
-  // Create without optional travelTip also succeeds
-  await assertSucceeds(
+  // A regular user cannot publish a route.
+  await assertFails(
     bobDb.collection("transit_methods").doc("habal_upland").set({
       userId: BOB_UID,
       name: "Upland Habal-Habal",
@@ -426,6 +433,7 @@ test("User profile DP & displayName: owner update with photoData succeeds, overs
 });
 
 test("Admin attractions: verified admin CRUD works, unverified spoof & regular user fail, filtered public list works", async () => {
+  await setAdminEmail(ADMIN_EMAIL);
   const unauthDb = testEnv.unauthenticatedContext().firestore();
   const aliceDb = testEnv.authenticatedContext(ALICE_UID, {
     email: "alice@example.com",
@@ -524,7 +532,8 @@ test("Admin attractions: verified admin CRUD works, unverified spoof & regular u
   await assertSucceeds(adminDb.collection("attractions").doc("gintong_ani").delete());
 });
 
-test("Admin emergency contacts & /admins grant: RBAC, email verification, filtered list & validation", async () => {
+test("Admin emergency contacts and manual email allowlist: RBAC, email verification, filtered list & validation", async () => {
+  await setAdminEmail(ADMIN_EMAIL);
   const aliceDb = testEnv.authenticatedContext(ALICE_UID, {
     email: "alice@example.com",
     email_verified: true,
@@ -587,25 +596,7 @@ test("Admin emergency contacts & /admins grant: RBAC, email verification, filter
     })
   );
 
-  // Admin grants Bob admin access via /admins/{BOB_UID}
-  await assertFails(aliceDb.collection("admins").get());
-  await assertFails(
-    aliceDb.collection("admins").doc(ALICE_UID).set({
-      userId: ALICE_UID,
-      email: "alice@example.com",
-      grantedBy: ALICE_UID,
-      createdAt: now,
-    })
-  );
-  await assertSucceeds(
-    adminDb.collection("admins").doc(BOB_UID).set({
-      userId: BOB_UID,
-      email: "bob@example.com",
-      grantedBy: ADMIN_UID,
-      createdAt: now,
-    })
-  );
-
+  await setAdminEmail("bob@example.com");
   // Promoted Bob can now update/delete emergency contact
   await assertSucceeds(
     bobDb.collection("emergency_contacts").doc("rescue_1").update({
@@ -617,3 +608,38 @@ test("Admin emergency contacts & /admins grant: RBAC, email verification, filter
 });
 
 
+
+test("Only operator-approved verified addresses have management access", async () => {
+  const email = "chosen@example.com";
+  const member = (uid, address, verified, provider) => testEnv.authenticatedContext(uid, {
+    email: address, email_verified: verified, firebase: { sign_in_provider: provider }
+  }).firestore();
+  const google = member("google_uid", "Chosen@example.com", true, "google.com");
+  const password = member("password_uid", email, true, "password");
+  const unverified = member("new_uid", email, false, "password");
+  const regular = member(ADMIN_UID, ADMIN_EMAIL, true, "google.com");
+  const directory = db => db.collection("users").get();
+
+  await testEnv.withSecurityRulesDisabled(async ctx => {
+    await ctx.firestore().collection("admins").doc(ADMIN_UID).set({userId: ADMIN_UID});
+  });
+  await assertFails(directory(regular));
+  await assertFails(directory(google));
+  await assertFails(directory(password));
+  await setAdminEmail(email);
+  await assertSucceeds(directory(google));
+  await assertSucceeds(directory(password));
+  await assertSucceeds(google.collection("admin_emails").doc(email).get());
+  await assertFails(directory(unverified));
+  await assertFails(directory(regular));
+  await assertFails(unverified.collection("admin_emails").doc(email).get());
+  await assertFails(regular.collection("admin_emails").doc(email).get());
+  for (const db of [google, regular, unverified]) {
+    await assertFails(db.collection("admin_emails").get());
+    await assertFails(db.collection("admin_emails").doc("other@example.com").set({enabled: true}));
+    await assertFails(db.collection("admin_emails").doc(email).delete());
+  }
+  await setAdminEmail(email, false);
+  await assertFails(directory(google));
+  await assertFails(directory(password));
+});

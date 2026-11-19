@@ -22,11 +22,15 @@ service cloud.firestore {
       return id is string && id.size() >= 1 && id.size() <= 128 && id.matches('^[a-zA-Z0-9_\\-]+$');
     }
 
+    function hasVerifiedEmail() {
+      return isSignedIn() && request.auth.token.get('email_verified', false) == true &&
+             request.auth.token.get('email', '') is string &&
+             request.auth.token.get('email', '').matches('^[^/]+$');
+    }
+
     function isAdmin() {
-      return isSignedIn() && (
-        (request.auth.token.email_verified == true && request.auth.token.email == 'bigbren480@gmail.com') ||
-        exists(/databases/$(database)/documents/admins/$(request.auth.uid))
-      );
+      return hasVerifiedEmail() &&
+             get(/databases/$(database)/documents/admin_emails/$(request.auth.token.email.lower())).data.enabled == true;
     }
 
     function isValidLanguage(lang) {
@@ -58,13 +62,6 @@ service cloud.firestore {
              data.offlinePackEnabled is bool &&
              data.createdAt is timestamp && data.createdAt <= request.time &&
              data.updatedAt is timestamp && data.updatedAt <= request.time;
-    }
-
-    function isValidAdminRecord(data) {
-      return data.userId is string && data.userId.size() >= 1 && data.userId.size() <= 128 &&
-             data.email is string && data.email.size() >= 3 && data.email.size() <= 160 &&
-             data.grantedBy is string && data.grantedBy == request.auth.uid &&
-             data.createdAt is timestamp && data.createdAt <= request.time;
     }
 
     function isValidAttraction(data) {
@@ -136,7 +133,6 @@ service cloud.firestore {
 
     function isValidTransitMethod(data) {
       return data.userId is string &&
-             data.userId == request.auth.uid &&
              data.name is string && data.name.size() >= 2 && data.name.size() <= 120 &&
              isValidTransitMode(data.modeCategory) &&
              data.operatorName is string && data.operatorName.size() >= 2 && data.operatorName.size() <= 100 &&
@@ -153,7 +149,7 @@ service cloud.firestore {
     }
 
     match /users/{userId} {
-      allow get, list: if isSignedIn() && request.auth.uid == userId;
+      allow get, list: if isSignedIn() && (request.auth.uid == userId || isAdmin());
 
       allow create: if isSignedIn() &&
                        isValidId(userId) &&
@@ -196,25 +192,9 @@ service cloud.firestore {
       }
     }
 
-    match /admins/{adminUid} {
-      allow get: if isSignedIn() && (request.auth.uid == adminUid || isAdmin());
-      allow list: if false;
-
-      allow create: if isAdmin() &&
-                       isValidId(adminUid) &&
-                       incoming().userId == adminUid &&
-                       incoming().keys().hasAll(['userId', 'email', 'grantedBy', 'createdAt']) &&
-                       incoming().keys().hasOnly(['userId', 'email', 'grantedBy', 'createdAt']) &&
-                       isValidAdminRecord(incoming());
-
-      allow update: if isAdmin() &&
-                       isValidId(adminUid) &&
-                       isValidAdminRecord(incoming()) &&
-                       incoming().userId == existing().userId &&
-                       incoming().createdAt == existing().createdAt &&
-                       incoming().diff(existing()).affectedKeys().hasOnly(['email', 'grantedBy']);
-
-      allow delete: if isAdmin() && isValidId(adminUid);
+    // Project operators maintain these documents through Firebase Console.
+    match /admin_emails/{email} {
+      allow get: if hasVerifiedEmail() && request.auth.token.email.lower() == email;
     }
 
     match /attractions/{attractionId} {
@@ -289,22 +269,21 @@ service cloud.firestore {
       allow get: if isSignedIn() && (existing().visibility == 'public' || existing().userId == request.auth.uid);
       allow list: if isSignedIn() && (resource.data.visibility == 'public' || resource.data.userId == request.auth.uid);
 
-      allow create: if isSignedIn() &&
+      allow create: if isAdmin() && incoming().userId == request.auth.uid &&
                        isValidId(transitId) &&
                        incoming().keys().hasAll(['userId', 'name', 'modeCategory', 'operatorName', 'routeSummary', 'scheduleText', 'fareRangePhp', 'durationText', 'terminalLocation', 'serviceStatus', 'visibility', 'createdAt', 'updatedAt']) &&
                        incoming().keys().hasOnly(['userId', 'name', 'modeCategory', 'operatorName', 'routeSummary', 'scheduleText', 'fareRangePhp', 'durationText', 'terminalLocation', 'travelTip', 'serviceStatus', 'visibility', 'createdAt', 'updatedAt']) &&
                        isValidTransitMethod(incoming());
 
-      allow update: if isSignedIn() &&
+      allow update: if isAdmin() &&
                        isValidId(transitId) &&
-                       existing().userId == request.auth.uid &&
                        isValidTransitMethod(incoming()) &&
                        incoming().userId == existing().userId &&
                        incoming().visibility == existing().visibility &&
                        incoming().createdAt == existing().createdAt &&
                        incoming().diff(existing()).affectedKeys().hasOnly(['name', 'modeCategory', 'operatorName', 'routeSummary', 'scheduleText', 'fareRangePhp', 'durationText', 'terminalLocation', 'travelTip', 'serviceStatus', 'updatedAt']);
 
-      allow delete: if isSignedIn() && isValidId(transitId) && existing().userId == request.auth.uid;
+      allow delete: if isAdmin() && isValidId(transitId);
     }
   }
 }

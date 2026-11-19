@@ -15,17 +15,14 @@
       },
       "required": ["userId", "displayName", "preferredLanguage", "offlinePackEnabled", "createdAt", "updatedAt"]
     },
-    "AdminUser": {
-      "title": "AdminUser",
-      "description": "Trusted administrator grant record keyed by Firebase Auth UID.",
+    "AdminEmail": {
+      "title": "Admin email",
+      "description": "Project-owner-managed entry keyed by lowercase verified email.",
       "type": "object",
       "properties": {
-        "userId": { "type": "string", "description": "Admin Firebase Auth UID" },
-        "email": { "type": "string", "description": "Admin verified email" },
-        "grantedBy": { "type": "string", "description": "UID of admin who granted the role" },
-        "createdAt": { "type": "string", "format": "date-time", "description": "Server timestamp on creation" }
+        "enabled": { "type": "boolean" }
       },
-      "required": ["userId", "email", "grantedBy", "createdAt"]
+      "required": ["enabled"]
     },
     "AttractionRecord": {
       "title": "AttractionRecord",
@@ -144,9 +141,9 @@
       "schema": { "$ref": "#/entities/ItineraryItem" },
       "description": "Traveler's planned itinerary stops and calendar reminder state."
     },
-    "/admins/{adminUid}": {
-      "schema": { "$ref": "#/entities/AdminUser" },
-      "description": "Authorized admin role lookup records."
+    "/admin_emails/{email}": {
+      "schema": { "$ref": "#/entities/AdminEmail" },
+      "description": "Manual admin email allowlist. Mobile clients can only read their own verified address."
     },
     "/attractions/{attractionId}": {
       "schema": { "$ref": "#/entities/AttractionRecord" },

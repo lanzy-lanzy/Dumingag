@@ -73,7 +73,7 @@ fun transitModeIcon(category: TransitModeCategory): ImageVector = when (category
 fun TransitMethodCard(
     method: TransitMethod,
     language: AppLanguage,
-    isOwner: Boolean,
+    canManage: Boolean,
     onEdit: () -> Unit,
     onDelete: () -> Unit,
     modifier: Modifier = Modifier
@@ -130,7 +130,7 @@ fun TransitMethodCard(
                 verticalArrangement = Arrangement.spacedBy(10.dp)
             ) {
                 BoxWithConstraints(modifier = Modifier.fillMaxWidth()) {
-                    val stackFareBadge = maxWidth < 290.dp
+                    val stackFareBadge = maxWidth < 320.dp * androidx.compose.ui.platform.LocalDensity.current.fontScale.coerceAtLeast(1f)
                     if (stackFareBadge) {
                         Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
                             TransitCardHeaderTitle(
@@ -306,7 +306,7 @@ fun TransitMethodCard(
                     }
                 }
 
-                if (isOwner) {
+                if (canManage) {
                     HorizontalDivider(color = MaterialTheme.colorScheme.outline.copy(alpha = 0.2f))
                     FlowRow(
                         modifier = Modifier.fillMaxWidth(),
