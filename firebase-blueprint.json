@@ -2,10 +2,12 @@
   "entities": {
     "UserProfile": {
       "title": "UserProfile",
-      "description": "Traveler preferences and editable profile metadata (display name and photo thumbnail) synced per user.",
+      "description": "Traveler preferences, role, verified email, and editable profile metadata (display name and photo thumbnail) synced per user.",
       "type": "object",
       "properties": {
         "userId": { "type": "string", "description": "Firebase Auth UID of the traveler" },
+        "email": { "type": "string", "description": "Signed-in account email address synced per user" },
+        "role": { "type": "string", "enum": ["regular", "admin"], "description": "User access role; unset or non-admin accounts default to regular" },
         "displayName": { "type": "string", "description": "Editable display name shown on profile and reviews" },
         "photoData": { "type": "string", "description": "Optional compressed base64 JPEG profile photo (DP)" },
         "favoriteAttractionIds": { "type": "array", "items": { "type": "string" }, "description": "Bookmarked Dumingag attraction IDs stored per user" },
@@ -21,9 +23,9 @@
       "description": "Project-owner-managed entry keyed by lowercase verified email.",
       "type": "object",
       "properties": {
-        "enabled": { "type": "boolean" }
-      },
-      "required": ["enabled"]
+        "enabled": { "type": "boolean" },
+        "role": { "type": "string", "enum": ["regular", "admin"] }
+      }
     },
     "AttractionRecord": {
       "title": "AttractionRecord",

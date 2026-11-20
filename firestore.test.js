@@ -723,3 +723,111 @@ test("User favorites & review star ratings: owner bookmarking works, oversized/n
   );
 });
 
+test("Manual role='admin' via verified email on users/{uid} or admin_emails/{email}: default regular, anti-escalation, and unverified denial", async () => {
+  const now = new Date(Date.now() - 5000);
+  const verifiedAliceDb = testEnv.authenticatedContext(ALICE_UID, {
+    email: "alice@example.com",
+    email_verified: true,
+  }).firestore();
+  const verifiedBobDb = testEnv.authenticatedContext(BOB_UID, {
+    email: "bob@example.com",
+    email_verified: true,
+  }).firestore();
+  const unverifiedAliceDb = testEnv.authenticatedContext("unverified_alice", {
+    email: "unverified@example.com",
+    email_verified: false,
+  }).firestore();
+
+  // Client cannot self-create with role='admin'
+  await assertFails(
+    verifiedAliceDb.collection("users").doc(ALICE_UID).set({
+      userId: ALICE_UID,
+      email: "alice@example.com",
+      role: "admin",
+      displayName: "Alice",
+      preferredLanguage: "en",
+      offlinePackEnabled: false,
+      createdAt: now,
+      updatedAt: now,
+    })
+  );
+
+  // Client creates normal profile with default role='regular' and verified email
+  await assertSucceeds(
+    verifiedAliceDb.collection("users").doc(ALICE_UID).set({
+      userId: ALICE_UID,
+      email: "alice@example.com",
+      role: "regular",
+      displayName: "Alice",
+      preferredLanguage: "en",
+      offlinePackEnabled: false,
+      createdAt: now,
+      updatedAt: now,
+    })
+  );
+
+  // Bob creates profile without explicit role (unset defaults to regular)
+  await assertSucceeds(
+    verifiedBobDb.collection("users").doc(BOB_UID).set({
+      userId: BOB_UID,
+      email: "bob@example.com",
+      displayName: "Bob",
+      preferredLanguage: "en",
+      offlinePackEnabled: false,
+      createdAt: now,
+      updatedAt: now,
+    })
+  );
+
+  // Client cannot self-escalate via update
+  await assertFails(
+    verifiedAliceDb.collection("users").doc(ALICE_UID).update({
+      role: "admin",
+      updatedAt: new Date(Date.now() - 1000),
+    })
+  );
+
+  // Regular / unset users cannot list users directory or create emergency contacts
+  await assertFails(verifiedAliceDb.collection("users").get());
+  await assertFails(verifiedBobDb.collection("users").get());
+
+  // Unverified user with role='admin' set in Firestore STILL cannot act as admin
+  await testEnv.withSecurityRulesDisabled(async (ctx) => {
+    await ctx.firestore().collection("users").doc("unverified_alice").set({
+      userId: "unverified_alice",
+      email: "unverified@example.com",
+      role: "admin",
+      displayName: "Unverified",
+      preferredLanguage: "en",
+      offlinePackEnabled: false,
+      createdAt: now,
+      updatedAt: now,
+    });
+    // Operator sets role='admin' on Alice's user doc
+    await ctx.firestore().collection("users").doc(ALICE_UID).update({
+      role: "admin",
+    });
+  });
+
+  await assertFails(unverifiedAliceDb.collection("users").get());
+  await assertSucceeds(verifiedAliceDb.collection("users").get());
+
+  // Alice (whose role='admin' was set in users/{uid}) can still edit her own displayName/favorites without changing role
+  await assertSucceeds(
+    verifiedAliceDb.collection("users").doc(ALICE_UID).update({
+      displayName: "Admin Alice",
+      favoriteAttractionIds: ["danlugan_falls"],
+      updatedAt: new Date(Date.now() - 1000),
+    })
+  );
+
+  // Operator sets role='admin' in admin_emails/{email} for Bob (without enabled flag)
+  await testEnv.withSecurityRulesDisabled(async (ctx) => {
+    await ctx.firestore().collection("admin_emails").doc("bob@example.com").set({
+      role: "admin",
+    });
+  });
+  await assertSucceeds(verifiedBobDb.collection("users").get());
+});
+
+

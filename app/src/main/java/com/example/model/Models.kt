@@ -214,6 +214,8 @@ sealed interface UiState<out T> {
 data class UserProfile(
     @DocumentId val id: String = "",
     val userId: String = "",
+    val email: String = "",
+    val role: String = "regular",
     val displayName: String = "",
     val photoData: String = "",
     val favoriteAttractionIds: List<String> = emptyList(),
@@ -221,7 +223,10 @@ data class UserProfile(
     val offlinePackEnabled: Boolean = false,
     @com.google.firebase.firestore.ServerTimestamp val createdAt: Timestamp? = null,
     @com.google.firebase.firestore.ServerTimestamp val updatedAt: Timestamp? = null
-)
+) {
+    fun normalizedRole(): String =
+        if (role.trim().equals("admin", ignoreCase = true)) "admin" else "regular"
+}
 
 @Keep
 @IgnoreExtraProperties
@@ -405,4 +410,11 @@ data class TransitMethod(
 
 
 
-data class ManagedUser(val uid: String, val displayName: String)
+data class ManagedUser(
+    val uid: String,
+    val displayName: String,
+    val email: String = "",
+    val role: String = "regular"
+) {
+    val isAdminRole: Boolean get() = role.trim().equals("admin", ignoreCase = true)
+}

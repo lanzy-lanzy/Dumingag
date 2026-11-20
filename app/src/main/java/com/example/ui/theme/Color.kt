@@ -88,3 +88,17 @@ val MapRouteCore = Color(0xFF1B4332)
 val MapUserPulse = Color(0x361D6F72)
 val MapUserPin = Color(0xFF1D6F72)
 val MapRatingGold = Color(0xFFFFC107)
+
+// Liquid Glass Auth Backdrop & Specular Tokens
+val GlassBackdropDeepTop = Color(0xCC062219)
+val GlassBackdropMid = Color(0xB80E382A)
+val GlassBackdropBottom = Color(0xF0081B14)
+val GlassLightHighlight = Color(0xE6FFFFFF)
+val GlassLightBorderMid = Color(0x73FFFFFF)
+val GlassLightBorderTail = Color(0x52C8E6D4)
+val GlassDarkHighlight = Color(0x66FFFFFF)
+val GlassDarkBorderMid = Color(0x2E8FD5B0)
+val GlassDarkBorderTail = Color(0x1FFFFFFF)
+val GlassHeroScrimTop = Color(0x55041A12)
+val GlassHeroScrimBottom = Color(0xCC062219)
+

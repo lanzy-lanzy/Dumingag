@@ -53,6 +53,7 @@ import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.key
+import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
@@ -108,9 +109,6 @@ import com.google.firebase.Firebase
 import com.google.firebase.auth.FirebaseAuth
 import com.google.firebase.auth.FirebaseUser
 import com.google.firebase.auth.auth
-import kotlinx.coroutines.CancellationException
-import kotlinx.coroutines.launch
-import kotlinx.coroutines.tasks.await
 import kotlinx.coroutines.channels.awaitClose
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.callbackFlow
@@ -174,10 +172,36 @@ fun AppNavigation() {
 
 @Composable
 fun AppNavigation(auth: FirebaseAuth) {
-    val currentUser by remember(auth) { auth.authStateFlow() }.collectAsStateWithLifecycle(initialValue = auth.currentUser?.toSessionUser())
-    val user = currentUser
-    if (user == null) {
-        AuthScreen(onAuthSuccess = {})
+    val context = LocalContext.current
+    val scope = rememberCoroutineScope()
+    val credentialManager = remember(context) { CredentialManager.create(context) }
+    var authRefreshTick by remember { mutableIntStateOf(0) }
+    val observedUser by remember(auth) { auth.authStateFlow() }
+        .collectAsStateWithLifecycle(initialValue = auth.currentUser?.toSessionUser())
+    val user = remember(observedUser, authRefreshTick) {
+        auth.currentUser?.toSessionUser() ?: observedUser
+    }
+    if (user == null || !user.isEmailVerified) {
+        val pendingEmail = user?.email?.takeIf { !user.isEmailVerified && it.isNotBlank() }
+        AuthScreen(
+            pendingVerificationEmail = pendingEmail,
+            onAuthSuccess = { authRefreshTick++ },
+            onCheckVerification = {
+                val verified = GoogleAuthHelper.refreshEmailVerificationStatus()
+                if (verified) {
+                    authRefreshTick++
+                }
+                verified
+            },
+            onResendVerification = {
+                GoogleAuthHelper.resendVerificationEmail()
+            },
+            onSignOutPendingVerification = {
+                GoogleAuthHelper.signOut(credentialManager, scope) {
+                    authRefreshTick++
+                }
+            }
+        )
     } else {
         val displayName = user.displayName?.takeIf { it.isNotBlank() } ?: user.email ?: "Dumingag Traveler"
         key(user.uid, user.email, user.isEmailVerified) {
@@ -294,6 +318,7 @@ fun DumingagMainScaffold(
         }
     }
 
+    Box(modifier = Modifier.fillMaxSize()) {
     BoxWithConstraints(modifier = Modifier.fillMaxSize()) {
         val useNavRail = maxWidth >= 600.dp
 
@@ -481,7 +506,7 @@ fun DumingagMainScaffold(
                                 key = "attractions_$currentUserId",
                                 factory = viewModelFactory {
                                     initializer {
-                                        val app = checkNotNull(this[APPLICATION_KEY]) as Application
+                                        val app = checkNotNull(this[APPLICATION_KEY])
                                         AttractionsViewModel(
                                             attractionRepository = AttractionRepository(app),
                                             offlineRepository = DumingagOfflineRepository(app)
@@ -515,7 +540,7 @@ fun DumingagMainScaffold(
                                 key = "attraction_detail_${currentUserId}_$attractionId",
                                 factory = viewModelFactory {
                                     initializer {
-                                        val app = checkNotNull(this[APPLICATION_KEY]) as Application
+                                        val app = checkNotNull(this[APPLICATION_KEY])
                                         AttractionDetailViewModel(
                                             attractionId = attractionId,
                                             attractionRepository = AttractionRepository(app),
@@ -635,40 +660,15 @@ fun DumingagMainScaffold(
                             CommunityReviewsScreen(
                                 language = language,
                                 currentUserId = currentUserId,
-                                userDisplayName = effectiveDisplayName,
-                                userEmail = userEmail,
-                                userPhotoData = userProfile?.photoData.orEmpty(),
-                                isAdmin = isAdmin,
                                 attractions = allAttractions,
                                 favoriteAttractions = favoriteAttractions,
                                 reviewsState = reviewsState,
-                                onOpenLanguagePicker = { showLanguageDialog = true },
-                                onEditProfile = { showEditProfileDialog = true },
-                                onOpenAdminConsole = { navController.navigate(DumingagRoutes.admin(0)) },
-                                onSignOut = {
-                                    GoogleAuthHelper.signOut(credentialManager, scope)
-                                },
                                 onOpenAttraction = { attraction ->
                                     navController.navigate(DumingagRoutes.attractionDetail(attraction.id))
                                 },
                                 onToggleFavorite = viewModel::toggleFavoriteAttraction,
                                 onSubmitReview = viewModel::submitReview,
                                 onUpdateReview = viewModel::updateReview,
-                                onVerifyEmail = if (isEmailVerified || userEmail.isBlank()) null else ({
-                                    scope.launch {
-                                        try {
-                                            val user = Firebase.auth.currentUser
-                                            if (user?.uid == currentUserId) {
-                                                user.sendEmailVerification().await()
-                                                viewModel.postStatusMessage("Check your email, then sign in again after verifying.")
-                                            }
-                                        } catch (e: CancellationException) {
-                                            throw e
-                                        } catch (e: Exception) {
-                                            viewModel.postStatusMessage(e.localizedMessage ?: "Unable to send verification email.")
-                                        }
-                                    }
-                                }),
                                 onDeleteReview = viewModel::deleteReview
                             )
                         }
@@ -718,6 +718,18 @@ fun DumingagMainScaffold(
                 navController.navigate(DumingagRoutes.attractionDetail(attraction.id))
             },
             onRemoveFavorite = viewModel::toggleFavoriteAttraction,
+            onOpenLanguagePicker = {
+                showEditProfileDialog = false
+                showLanguageDialog = true
+            },
+            onOpenAdminConsole = {
+                showEditProfileDialog = false
+                navController.navigate(DumingagRoutes.admin(0))
+            },
+            onSignOut = {
+                showEditProfileDialog = false
+                GoogleAuthHelper.signOut(credentialManager, scope)
+            },
             onDismiss = { showEditProfileDialog = false },
             onSave = { name, photoData, clearPhoto ->
                 viewModel.updateProfile(
@@ -728,6 +740,7 @@ fun DumingagMainScaffold(
                 showEditProfileDialog = false
             }
         )
+    }
     }
 
     if (showLanguageDialog) {

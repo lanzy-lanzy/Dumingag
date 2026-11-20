@@ -29,7 +29,12 @@ class AdminLayoutTest {
                 DumingagTheme {
                     AdminManagementScreen(
                         language = AppLanguage.EN, isAdmin = admin, adminEmail = "admin@example.org",
-                        currentUserId = "admin", loadUsers = { listOf(ManagedUser("guest", "Guest")) },
+                        currentUserId = "admin", loadUsers = {
+                            listOf(
+                                ManagedUser("admin", "Admin User", "admin@example.org", "admin"),
+                                ManagedUser("guest", "Guest", "guest@example.com", "regular")
+                            )
+                        },
                         attractions = attractions,
                         emergencyContacts = DumingagSeedData.emergencyContacts,
                         onBackClick = {},
@@ -51,6 +56,8 @@ class AdminLayoutTest {
         compose.onNodeWithTag("admin_tab_users").performClick()
         grid.performScrollToNode(hasText("Guest"))
         compose.onNodeWithText("Guest").assertIsDisplayed()
+        compose.onNodeWithText("guest@example.com").assertIsDisplayed()
+        compose.onNodeWithText("REGULAR").assertIsDisplayed()
         compose.onNodeWithText("Grant admin access").assertDoesNotExist()
     }
 

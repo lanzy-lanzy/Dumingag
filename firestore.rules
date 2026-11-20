@@ -28,9 +28,27 @@ service cloud.firestore {
              request.auth.token.get('email', '').matches('^[^/]+$');
     }
 
+    function isAdminUserProfileData(data) {
+      return data.get('role', 'regular') == 'admin' &&
+             (!('email' in data) || data.email == '' || data.email.lower() == request.auth.token.email.lower());
+    }
+
+    function hasAdminUserDoc() {
+      return exists(/databases/$(database)/documents/users/$(request.auth.uid)) &&
+             isAdminUserProfileData(get(/databases/$(database)/documents/users/$(request.auth.uid)).data);
+    }
+
+    function isAdminEmailDocData(data) {
+      return data.get('role', 'regular') == 'admin' || data.get('enabled', false) == true;
+    }
+
+    function hasAdminEmailDoc() {
+      return exists(/databases/$(database)/documents/admin_emails/$(request.auth.token.email.lower())) &&
+             isAdminEmailDocData(get(/databases/$(database)/documents/admin_emails/$(request.auth.token.email.lower())).data);
+    }
+
     function isAdmin() {
-      return hasVerifiedEmail() &&
-             get(/databases/$(database)/documents/admin_emails/$(request.auth.token.email.lower())).data.enabled == true;
+      return hasVerifiedEmail() && (hasAdminUserDoc() || hasAdminEmailDoc());
     }
 
     function isValidLanguage(lang) {
@@ -56,6 +74,9 @@ service cloud.firestore {
     function isValidUserProfile(data) {
       return data.userId is string &&
              data.userId == request.auth.uid &&
+             (!('email' in data) || (data.email is string && data.email.size() <= 160 &&
+               (data.email == '' || (request.auth.token.get('email', '') is string && data.email.lower() == request.auth.token.email.lower())))) &&
+             (!('role' in data) || (data.role is string && data.role in ['regular', 'admin'])) &&
              data.displayName is string && data.displayName.size() >= 1 && data.displayName.size() <= 80 &&
              (!('photoData' in data) || (data.photoData is string && data.photoData.size() <= 65536)) &&
              (!('favoriteAttractionIds' in data) || (data.favoriteAttractionIds is list && data.favoriteAttractionIds.size() <= 100)) &&
@@ -156,7 +177,8 @@ service cloud.firestore {
                        isValidId(userId) &&
                        request.auth.uid == userId &&
                        incoming().keys().hasAll(['userId', 'displayName', 'preferredLanguage', 'offlinePackEnabled', 'createdAt', 'updatedAt']) &&
-                       incoming().keys().hasOnly(['userId', 'displayName', 'photoData', 'favoriteAttractionIds', 'preferredLanguage', 'offlinePackEnabled', 'createdAt', 'updatedAt']) &&
+                       incoming().keys().hasOnly(['userId', 'email', 'role', 'displayName', 'photoData', 'favoriteAttractionIds', 'preferredLanguage', 'offlinePackEnabled', 'createdAt', 'updatedAt']) &&
+                       (!('role' in incoming()) || incoming().role == 'regular') &&
                        isValidUserProfile(incoming());
 
       allow update: if isSignedIn() &&
@@ -165,7 +187,8 @@ service cloud.firestore {
                        isValidUserProfile(incoming()) &&
                        incoming().userId == existing().userId &&
                        incoming().createdAt == existing().createdAt &&
-                       incoming().diff(existing()).affectedKeys().hasOnly(['displayName', 'photoData', 'favoriteAttractionIds', 'preferredLanguage', 'offlinePackEnabled', 'updatedAt']);
+                       !('role' in incoming().diff(existing()).affectedKeys()) &&
+                       incoming().diff(existing()).affectedKeys().hasOnly(['email', 'displayName', 'photoData', 'favoriteAttractionIds', 'preferredLanguage', 'offlinePackEnabled', 'updatedAt']);
 
       allow delete: if isSignedIn() && isValidId(userId) && request.auth.uid == userId;
 

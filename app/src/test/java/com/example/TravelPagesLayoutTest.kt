@@ -58,13 +58,11 @@ class TravelPagesLayoutTest {
                                 onDeleteCustomDocument = {}, onShowMessage = {}
                             )
                             else -> CommunityReviewsScreen(
-                                language = AppLanguage.EN, currentUserId = "viewer", userDisplayName = "Traveler",
-                                userEmail = "", userPhotoData = "", isAdmin = false, attractions = attractions,
+                                language = AppLanguage.EN, currentUserId = "viewer", attractions = attractions,
                                 reviewsState = UiState.Success(listOf(
                                     CommunityReview(id = "a", attractionName = "Review A"),
                                     CommunityReview(id = "b", attractionName = "Review B")
                                 )),
-                                onOpenLanguagePicker = {}, onEditProfile = {}, onOpenAdminConsole = {}, onSignOut = {},
                                 onSubmitReview = { _, _, _, _ -> }, onUpdateReview = { _, _, _, _ -> }, onDeleteReview = {}
                             )
                         }
@@ -99,6 +97,75 @@ class TravelPagesLayoutTest {
             val left = compose.onNodeWithText("$label A").getUnclippedBoundsInRoot()
             val right = compose.onNodeWithText("$label B").getUnclippedBoundsInRoot()
             assertTrue("$screen cards should share a row", right.left >= left.right && right.top == left.top)
+        }
+    }
+
+    @Test
+    fun reviewsScreenFocusesOnReviewsAndFavoritesWithoutSignOutClutter() {
+        compose.setContent {
+            DumingagTheme {
+                CommunityReviewsScreen(
+                    language = AppLanguage.EN,
+                    currentUserId = "viewer",
+                    attractions = attractions,
+                    favoriteAttractions = listOf(attractions.first()),
+                    reviewsState = UiState.Success(
+                        listOf(
+                            CommunityReview(
+                                id = "r1",
+                                userId = "viewer",
+                                attractionId = attractions.first().id,
+                                attractionName = attractions.first().name.en,
+                                rating = 5,
+                                comment = "Great view!"
+                            )
+                        )
+                    ),
+                    onSubmitReview = { _, _, _, _ -> },
+                    onUpdateReview = { _, _, _, _ -> },
+                    onDeleteReview = {}
+                )
+            }
+        }
+        compose.onNodeWithText("My Favorite Attractions (1)").assertIsDisplayed()
+        compose.onNodeWithTag("filter_my_reviews_chip").assertIsDisplayed()
+        compose.onNodeWithText("Sign Out").assertDoesNotExist()
+        compose.onNodeWithText("Edit profile").assertDoesNotExist()
+    }
+
+    @Test
+    @Config(qualifiers = "w320dp-h520dp")
+    fun tappingDisplayPictureProfileHubIncludesEditProfilePreferencesAndSignOut() {
+        var signedOut = 0
+        var openedLanguage = 0
+        compose.setContent {
+            DumingagTheme {
+                com.example.ui.components.EditProfileDialog(
+                    initialName = "Bren",
+                    initialPhotoData = "",
+                    email = "bigbren480@gmail.com",
+                    isAdmin = true,
+                    favoriteAttractions = attractions,
+                    onOpenLanguagePicker = { openedLanguage++ },
+                    onSignOut = { signedOut++ },
+                    onDismiss = {},
+                    onSave = { _, _, _ -> }
+                )
+            }
+        }
+        compose.onNodeWithTag("profile_account_dialog").assertIsDisplayed()
+        compose.onNodeWithTag("profile_sign_out_button").assertIsDisplayed()
+        val dialogBounds = compose.onNodeWithTag("profile_account_dialog").getUnclippedBoundsInRoot()
+        val signOutBounds = compose.onNodeWithTag("profile_sign_out_button").getUnclippedBoundsInRoot()
+        assertTrue("Sign Out must stay inside visible dialog bounds", signOutBounds.bottom <= dialogBounds.bottom)
+        compose.onNodeWithTag("edit_profile_name_input").performScrollTo().assertIsDisplayed()
+        compose.onNodeWithTag("save_profile_button").performScrollTo().assertIsDisplayed()
+        compose.onNodeWithTag("profile_language_button").performScrollTo().performClick()
+        compose.onNodeWithTag("profile_admin_console_button").performScrollTo().assertIsDisplayed()
+        compose.onNodeWithTag("profile_sign_out_button").assertIsDisplayed().performClick()
+        compose.runOnIdle {
+            assertTrue(openedLanguage == 1)
+            assertTrue(signedOut == 1)
         }
     }
 }

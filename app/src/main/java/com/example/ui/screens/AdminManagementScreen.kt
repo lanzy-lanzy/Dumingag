@@ -224,6 +224,8 @@ fun AdminManagementScreen(
     }
     val matchingUsers = (users as? UiState.Success)?.data.orEmpty().filter {
         it.displayName.contains(queryTrimmed, ignoreCase = true) ||
+            it.email.contains(queryTrimmed, ignoreCase = true) ||
+            it.role.contains(queryTrimmed, ignoreCase = true) ||
             it.uid.contains(queryTrimmed, ignoreCase = true)
     }
     val count = when (selectedTab) {
@@ -318,7 +320,7 @@ fun AdminManagementScreen(
                         label = { Text(when (selectedTab) {
                             0 -> "Search attractions or barangay"
                             1 -> "Search hotlines or agencies"
-                            else -> "Search names or user IDs"
+                            else -> "Search names, emails, roles, or UIDs"
                         }) },
                         leadingIcon = { Icon(Icons.Default.Search, null) },
                         trailingIcon = {
@@ -333,8 +335,18 @@ fun AdminManagementScreen(
             }
             if (selectedTab == 2) {
                 item(span = { GridItemSpan(maxLineSpan) }) {
-                    Text("The Firebase project owner manages admin access by verified email.",
-                        style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                    Surface(
+                        color = MaterialTheme.colorScheme.secondaryContainer.copy(alpha = 0.55f),
+                        shape = RoundedCornerShape(14.dp),
+                        modifier = Modifier.fillMaxWidth()
+                    ) {
+                        Text(
+                            text = "Assign admins in Firestore using a verified email: set role = \"admin\" on users/{uid} or in admin_emails/{email}. Accounts without role = \"admin\" stay regular.",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSecondaryContainer,
+                            modifier = Modifier.padding(12.dp)
+                        )
+                    }
                 }
             }
             val userState = users
@@ -386,10 +398,45 @@ fun AdminManagementScreen(
                         shape = RoundedCornerShape(18.dp)
                     ) {
                         Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
-                            if (user.uid == currentUserId) {
-                                Text("Admin (you)", style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.primary)
+                            FlowRow(
+                                horizontalArrangement = Arrangement.spacedBy(8.dp),
+                                verticalArrangement = Arrangement.spacedBy(4.dp)
+                            ) {
+                                Surface(
+                                    color = if (user.isAdminRole) MaterialTheme.colorScheme.secondaryContainer else MaterialTheme.colorScheme.surfaceVariant,
+                                    shape = RoundedCornerShape(50)
+                                ) {
+                                    Text(
+                                        text = if (user.isAdminRole) "ADMIN" else "REGULAR",
+                                        style = MaterialTheme.typography.labelSmall,
+                                        fontWeight = FontWeight.Bold,
+                                        color = if (user.isAdminRole) MaterialTheme.colorScheme.secondary else MaterialTheme.colorScheme.onSurfaceVariant,
+                                        modifier = Modifier.padding(horizontal = 8.dp, vertical = 3.dp)
+                                    )
+                                }
+                                if (user.uid == currentUserId) {
+                                    Surface(
+                                        color = MaterialTheme.colorScheme.primaryContainer,
+                                        shape = RoundedCornerShape(50)
+                                    ) {
+                                        Text(
+                                            text = "YOU",
+                                            style = MaterialTheme.typography.labelSmall,
+                                            fontWeight = FontWeight.Bold,
+                                            color = MaterialTheme.colorScheme.primary,
+                                            modifier = Modifier.padding(horizontal = 8.dp, vertical = 3.dp)
+                                        )
+                                    }
+                                }
                             }
-                            Text(user.displayName, style = MaterialTheme.typography.titleLarge)
+                            Text(user.displayName.ifBlank { "Traveler" }, style = MaterialTheme.typography.titleLarge)
+                            if (user.email.isNotBlank()) {
+                                Text(
+                                    text = user.email,
+                                    style = MaterialTheme.typography.bodyMedium,
+                                    color = MaterialTheme.colorScheme.primary
+                                )
+                            }
                             Text(user.uid, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
                         }
                     }

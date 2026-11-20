@@ -246,7 +246,7 @@ class DumingagViewModel(
 
     init {
         viewModelScope.launch {
-            cloudRepo.ensureUserProfile(currentUserId, userDisplayName).onFailure {
+            cloudRepo.ensureUserProfile(currentUserId, userDisplayName, userEmail).onFailure {
                 _statusMessage.value = "Unable to initialize your traveler profile: ${it.localizedMessage}"
             }
         }

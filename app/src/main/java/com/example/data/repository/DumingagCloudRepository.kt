@@ -22,9 +22,12 @@ import com.google.firebase.firestore.snapshots
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.catch
+import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.flow
+import kotlinx.coroutines.flow.flowOf
 import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.tasks.await
+import java.util.Locale
 
 class DumingagCloudRepository(
     private val db: FirebaseFirestore,
@@ -41,26 +44,48 @@ class DumingagCloudRepository(
             ?: throw IllegalStateException("User must be signed in before accessing Firestore.")
     }
 
-    suspend fun ensureUserProfile(userId: String, displayName: String): Result<Unit> {
+    suspend fun ensureUserProfile(
+        userId: String,
+        displayName: String,
+        email: String = ""
+    ): Result<Unit> {
         val docPath = "users/$userId"
         return try {
             val uid = requireUserId()
             check(uid == userId) { "Signed-in user mismatch" }
+            val cleanEmail = email.trim().ifBlank { auth.currentUser?.email.orEmpty().trim() }
+                .lowercase(Locale.ROOT)
+                .take(160)
             val docRef = db.collection("users").document(uid)
             db.runTransaction { transaction ->
                 val existing = transaction.get(docRef)
                 if (!existing.exists()) {
                     val safeName = displayName.trim().ifBlank { "Traveler" }.take(80)
-                    val payload = mapOf(
-                        "userId" to uid,
-                        "displayName" to safeName,
-                        "favoriteAttractionIds" to emptyList<String>(),
-                        "preferredLanguage" to "en",
-                        "offlinePackEnabled" to false,
-                        "createdAt" to FieldValue.serverTimestamp(),
-                        "updatedAt" to FieldValue.serverTimestamp()
-                    )
+                    val payload = buildMap<String, Any> {
+                        put("userId", uid)
+                        if (cleanEmail.isNotEmpty()) {
+                            put("email", cleanEmail)
+                        }
+                        put("role", "regular")
+                        put("displayName", safeName)
+                        put("favoriteAttractionIds", emptyList<String>())
+                        put("preferredLanguage", "en")
+                        put("offlinePackEnabled", false)
+                        put("createdAt", FieldValue.serverTimestamp())
+                        put("updatedAt", FieldValue.serverTimestamp())
+                    }
                     transaction.set(docRef, payload)
+                } else {
+                    val existingEmail = existing.getString("email").orEmpty().trim().lowercase(Locale.ROOT)
+                    if (cleanEmail.isNotEmpty() && existingEmail != cleanEmail) {
+                        transaction.update(
+                            docRef,
+                            mapOf(
+                                "email" to cleanEmail,
+                                "updatedAt" to FieldValue.serverTimestamp()
+                            )
+                        )
+                    }
                 }
                 Unit
             }.await()
@@ -596,22 +621,39 @@ class DumingagCloudRepository(
 
     suspend fun loadManagedUsers(): List<ManagedUser> {
         val profiles = db.collection("users").get(Source.SERVER).await()
-        return profiles.documents.map {
-            ManagedUser(it.id, it.getString("displayName").orEmpty())
-        }.sortedWith(compareBy({ it.displayName.lowercase() }, { it.uid }))
+        return profiles.documents.map { doc ->
+            val rawRole = doc.getString("role")?.trim()?.lowercase(Locale.ROOT)
+            val normalizedRole = if (rawRole == "admin") "admin" else "regular"
+            ManagedUser(
+                uid = doc.id,
+                displayName = doc.getString("displayName").orEmpty(),
+                email = doc.getString("email").orEmpty(),
+                role = normalizedRole
+            )
+        }.sortedWith(
+            compareByDescending<ManagedUser> { it.isAdminRole }
+                .thenBy { it.displayName.lowercase(Locale.ROOT) }
+                .thenBy { it.uid }
+        )
     }
 
-    fun observeAdminAccess(userId: String, email: String, verified: Boolean): Flow<Boolean> = flow {
-        val address = email.lowercase(java.util.Locale.ROOT)
+    fun observeAdminAccess(userId: String, email: String, verified: Boolean): Flow<Boolean> {
+        val address = email.trim().lowercase(Locale.ROOT)
         if (!verified || address.isBlank() || '/' in address || auth.currentUser?.uid != userId) {
-            emit(false)
-            return@flow
+            return flowOf(false)
         }
-        val docRef = db.collection("admin_emails").document(address)
-        docRef.snapshots(MetadataChanges.INCLUDE)
+        val userDocFlow = db.collection("users").document(userId)
+            .snapshots(MetadataChanges.INCLUDE)
             .map { snapshot ->
-                !snapshot.metadata.isFromCache && !snapshot.metadata.hasPendingWrites() &&
-                    snapshot.get("enabled") == true && auth.currentUser?.uid == userId
+                val role = snapshot.getString("role")?.trim()?.lowercase(Locale.ROOT)
+                val docEmail = snapshot.getString("email").orEmpty().trim().lowercase(Locale.ROOT)
+                val emailMatches = docEmail.isBlank() || docEmail == address
+                !snapshot.metadata.isFromCache &&
+                    !snapshot.metadata.hasPendingWrites() &&
+                    snapshot.exists() &&
+                    role == "admin" &&
+                    emailMatches &&
+                    auth.currentUser?.uid == userId
             }
             .catch { error ->
                 val firestoreError = generateSequence(error) { it.cause }
@@ -620,7 +662,29 @@ class DumingagCloudRepository(
                 if (firestoreError == null && error is CancellationException) throw error
                 emit(false)
             }
-            .collect { emit(it) }
+
+        val adminEmailDocFlow = db.collection("admin_emails").document(address)
+            .snapshots(MetadataChanges.INCLUDE)
+            .map { snapshot ->
+                val role = snapshot.getString("role")?.trim()?.lowercase(Locale.ROOT)
+                val enabled = snapshot.get("enabled") == true
+                !snapshot.metadata.isFromCache &&
+                    !snapshot.metadata.hasPendingWrites() &&
+                    snapshot.exists() &&
+                    (enabled || role == "admin") &&
+                    auth.currentUser?.uid == userId
+            }
+            .catch { error ->
+                val firestoreError = generateSequence(error) { it.cause }
+                    .filterIsInstance<FirebaseFirestoreException>()
+                    .firstOrNull()
+                if (firestoreError == null && error is CancellationException) throw error
+                emit(false)
+            }
+
+        return combine(userDocFlow, adminEmailDocFlow) { fromUserDoc, fromEmailDoc ->
+            (fromUserDoc || fromEmailDoc) && auth.currentUser?.uid == userId
+        }
     }
 
     suspend fun updateUserProfile(
@@ -643,8 +707,13 @@ class DumingagCloudRepository(
             val docRef = db.collection("users").document(uid)
             val existing = docRef.get().await()
             if (!existing.exists()) {
+                val currentEmail = auth.currentUser?.email.orEmpty().trim().lowercase(Locale.ROOT).take(160)
                 val payload = buildMap<String, Any> {
                     put("userId", uid)
+                    if (currentEmail.isNotEmpty()) {
+                        put("email", currentEmail)
+                    }
+                    put("role", "regular")
                     put("displayName", safeName)
                     if (!clearPhoto && !cleanPhoto.isNullOrEmpty()) {
                         put("photoData", cleanPhoto)
@@ -703,15 +772,20 @@ class DumingagCloudRepository(
             val added = db.runTransaction { transaction ->
                 val existing = transaction.get(docRef)
                 if (!existing.exists()) {
-                    val payload = mapOf(
-                        "userId" to uid,
-                        "displayName" to safeName,
-                        "favoriteAttractionIds" to listOf(safeAttractionId),
-                        "preferredLanguage" to "en",
-                        "offlinePackEnabled" to false,
-                        "createdAt" to FieldValue.serverTimestamp(),
-                        "updatedAt" to FieldValue.serverTimestamp()
-                    )
+                    val currentEmail = auth.currentUser?.email.orEmpty().trim().lowercase(Locale.ROOT).take(160)
+                    val payload = buildMap<String, Any> {
+                        put("userId", uid)
+                        if (currentEmail.isNotEmpty()) {
+                            put("email", currentEmail)
+                        }
+                        put("role", "regular")
+                        put("displayName", safeName)
+                        put("favoriteAttractionIds", listOf(safeAttractionId))
+                        put("preferredLanguage", "en")
+                        put("offlinePackEnabled", false)
+                        put("createdAt", FieldValue.serverTimestamp())
+                        put("updatedAt", FieldValue.serverTimestamp())
+                    }
                     transaction.set(docRef, payload)
                     true
                 } else {

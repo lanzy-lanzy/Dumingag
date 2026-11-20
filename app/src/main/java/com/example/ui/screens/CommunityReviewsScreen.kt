@@ -4,14 +4,10 @@ import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
-import androidx.compose.foundation.layout.ExperimentalLayoutApi
-import androidx.compose.foundation.layout.FlowRow
-import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
-import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
@@ -20,26 +16,17 @@ import androidx.compose.foundation.lazy.grid.items
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.automirrored.filled.Logout
 import androidx.compose.material.icons.filled.AddComment
-import androidx.compose.material.icons.filled.AdminPanelSettings
-import androidx.compose.material.icons.filled.Edit
 import androidx.compose.material.icons.filled.Favorite
 import androidx.compose.material.icons.filled.Star
-import androidx.compose.material.icons.filled.Translate
-import androidx.compose.material3.Button
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.CircularProgressIndicator
-import androidx.compose.material3.FilledTonalButton
 import androidx.compose.material3.FilterChip
-import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
-import androidx.compose.material3.TextButton
 import androidx.compose.material3.minimumInteractiveComponentSize
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
@@ -64,32 +51,23 @@ import com.example.model.UiState
 import com.example.ui.components.AttractionCoverImage
 import com.example.ui.components.ComposeReviewDialog
 import com.example.ui.components.ReviewCard
-import com.example.ui.components.UserAvatar
 import com.example.ui.theme.MapRatingGold
 
 @Composable
 fun CommunityReviewsScreen(
     language: AppLanguage,
     currentUserId: String,
-    userDisplayName: String,
-    userEmail: String,
-    userPhotoData: String,
-    isAdmin: Boolean,
     attractions: List<Attraction>,
     favoriteAttractions: List<Attraction> = emptyList(),
     reviewsState: UiState<List<CommunityReview>>,
-    onOpenLanguagePicker: () -> Unit,
-    onEditProfile: () -> Unit,
-    onOpenAdminConsole: () -> Unit,
-    onSignOut: () -> Unit,
     onOpenAttraction: (Attraction) -> Unit = {},
     onToggleFavorite: (Attraction) -> Unit = {},
     onSubmitReview: (Attraction, Int, String, String) -> Unit,
     onUpdateReview: (String, Int, String, String) -> Unit,
-    onDeleteReview: (String) -> Unit,
-    onVerifyEmail: (() -> Unit)? = null
+    onDeleteReview: (String) -> Unit
 ) {
     var filterAttractionId by remember { mutableStateOf<String?>(null) }
+    var myReviewsOnly by remember { mutableStateOf(false) }
     var showComposeDialog by remember { mutableStateOf(false) }
     var editingReview by remember { mutableStateOf<CommunityReview?>(null) }
 
@@ -110,7 +88,7 @@ fun CommunityReviewsScreen(
             }
         }
 
-        // Traveler Profile, Saved Favorites Quick Access, DP Editor, Admin Console & Sign-Out Card
+        // Dedicated Favorite Attractions quick-access card
         pageSection {
             Card(
                 shape = RoundedCornerShape(20.dp),
@@ -123,195 +101,81 @@ fun CommunityReviewsScreen(
                     verticalArrangement = Arrangement.spacedBy(10.dp)
                 ) {
                     Row(
-                        modifier = Modifier.fillMaxWidth(),
-                        verticalAlignment = Alignment.CenterVertically
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(6.dp)
                     ) {
-                        UserAvatar(
-                            displayName = userDisplayName,
-                            photoData = userPhotoData,
-                            size = 52.dp
+                        Icon(
+                            imageVector = Icons.Default.Favorite,
+                            contentDescription = null,
+                            tint = Color(0xFFE11D48),
+                            modifier = Modifier.size(18.dp)
                         )
-                        Spacer(modifier = Modifier.width(12.dp))
-                        Column(modifier = Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(2.dp)) {
-                            @OptIn(ExperimentalLayoutApi::class)
-                            FlowRow(
-                                verticalArrangement = Arrangement.Center,
-                                horizontalArrangement = Arrangement.spacedBy(6.dp)
-                            ) {
-                                Text(
-                                    text = userDisplayName,
-                                    style = MaterialTheme.typography.titleMedium,
-                                    maxLines = 1,
-                                    overflow = TextOverflow.Ellipsis
-                                )
-                                if (isAdmin) {
-                                    Surface(
-                                        color = MaterialTheme.colorScheme.secondaryContainer,
-                                        shape = RoundedCornerShape(50)
+                        Text(
+                            text = "My Favorite Attractions (${favoriteAttractions.size})",
+                            style = MaterialTheme.typography.titleSmall,
+                            fontWeight = FontWeight.Bold
+                        )
+                    }
+
+                    if (favoriteAttractions.isEmpty()) {
+                        Text(
+                            text = "Bookmark attractions with the heart icon on Explore or Map for quick access here.",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                        )
+                    } else {
+                        LazyRow(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+                            items(favoriteAttractions, key = { it.id }) { fav ->
+                                Card(
+                                    shape = RoundedCornerShape(16.dp),
+                                    colors = CardDefaults.cardColors(
+                                        containerColor = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.55f)
+                                    ),
+                                    border = BorderStroke(1.dp, MaterialTheme.colorScheme.outline.copy(alpha = 0.2f)),
+                                    modifier = Modifier
+                                        .width(216.dp)
+                                        .clip(RoundedCornerShape(16.dp))
+                                        .clickable { onOpenAttraction(fav) }
+                                        .testTag("reviews_profile_favorite_${fav.id}")
+                                ) {
+                                    Row(
+                                        modifier = Modifier.padding(8.dp),
+                                        verticalAlignment = Alignment.CenterVertically
                                     ) {
-                                        Text(
-                                            text = "ADMIN",
-                                            style = MaterialTheme.typography.labelSmall,
-                                            color = MaterialTheme.colorScheme.secondary,
-                                            fontWeight = FontWeight.Bold,
-                                            modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp)
+                                        AttractionCoverImage(
+                                            attraction = fav,
+                                            contentDescription = fav.name.get(language),
+                                            modifier = Modifier
+                                                .size(48.dp)
+                                                .clip(RoundedCornerShape(12.dp)),
+                                            contentScale = ContentScale.Crop
                                         )
-                                    }
-                                }
-                            }
-                            if (userEmail.isNotBlank()) {
-                                Text(
-                                    text = userEmail,
-                                    style = MaterialTheme.typography.bodySmall,
-                                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                                    maxLines = 1,
-                                    overflow = TextOverflow.Ellipsis
-                                )
-                            }
-                            Text(
-                                text = "Language: ${language.nativeLabel}",
-                                style = MaterialTheme.typography.labelSmall,
-                                color = MaterialTheme.colorScheme.secondary
-                            )
-                        }
-                    }
-
-                    @OptIn(ExperimentalLayoutApi::class)
-                    FlowRow(
-                        modifier = Modifier.fillMaxWidth(),
-                        horizontalArrangement = Arrangement.spacedBy(8.dp),
-                        verticalArrangement = Arrangement.spacedBy(8.dp)
-                    ) {
-                        FilledTonalButton(
-                            onClick = onEditProfile,
-                            contentPadding = PaddingValues(horizontal = 14.dp, vertical = 10.dp),
-                            modifier = Modifier
-                                .align(Alignment.CenterVertically)
-                                .heightIn(min = 48.dp)
-                                .testTag("edit_profile_button")
-                        ) {
-                            Icon(Icons.Default.Edit, contentDescription = null, modifier = Modifier.size(16.dp))
-                            Spacer(modifier = Modifier.width(6.dp))
-                            Text("Edit profile", maxLines = 1)
-                        }
-
-                        onVerifyEmail?.let { verify ->
-                            TextButton(
-                                onClick = verify,
-                                modifier = Modifier.heightIn(min = 48.dp)
-                            ) { Text("Verify email") }
-                        }
-                        if (isAdmin) {
-                            Button(
-                                onClick = onOpenAdminConsole,
-                                contentPadding = PaddingValues(horizontal = 14.dp, vertical = 10.dp),
-                                modifier = Modifier
-                                    .align(Alignment.CenterVertically)
-                                    .heightIn(min = 48.dp)
-                                    .testTag("open_admin_console_button")
-                            ) {
-                                Icon(Icons.Default.AdminPanelSettings, contentDescription = null, modifier = Modifier.size(18.dp))
-                                Spacer(modifier = Modifier.width(6.dp))
-                                Text("Admin Console", maxLines = 1)
-                            }
-                        }
-                        IconButton(
-                            onClick = onOpenLanguagePicker,
-                            modifier = Modifier.minimumInteractiveComponentSize()
-                        ) {
-                            Icon(Icons.Default.Translate, contentDescription = "Change language")
-                        }
-                        IconButton(
-                            onClick = onSignOut,
-                            modifier = Modifier
-                                .minimumInteractiveComponentSize()
-                                .testTag("sign_out_button")
-                        ) {
-                            Icon(Icons.AutoMirrored.Filled.Logout, contentDescription = "Sign out")
-                        }
-                    }
-
-                    HorizontalDivider(color = MaterialTheme.colorScheme.outline.copy(alpha = 0.2f))
-
-                    // My Favorites Quick Access in Profile Card
-                    Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                        Row(
-                            verticalAlignment = Alignment.CenterVertically,
-                            horizontalArrangement = Arrangement.spacedBy(6.dp)
-                        ) {
-                            Icon(
-                                imageVector = Icons.Default.Favorite,
-                                contentDescription = null,
-                                tint = Color(0xFFE11D48),
-                                modifier = Modifier.size(17.dp)
-                            )
-                            Text(
-                                text = "My Favorite Attractions (${favoriteAttractions.size})",
-                                style = MaterialTheme.typography.titleSmall,
-                                fontWeight = FontWeight.Bold
-                            )
-                        }
-
-                        if (favoriteAttractions.isEmpty()) {
-                            Text(
-                                text = "Bookmark attractions with the heart icon on Explore or Map for quick access here.",
-                                style = MaterialTheme.typography.bodySmall,
-                                color = MaterialTheme.colorScheme.onSurfaceVariant
-                            )
-                        } else {
-                            LazyRow(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
-                                items(favoriteAttractions, key = { it.id }) { fav ->
-                                    Card(
-                                        shape = RoundedCornerShape(16.dp),
-                                        colors = CardDefaults.cardColors(
-                                            containerColor = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.55f)
-                                        ),
-                                        border = BorderStroke(1.dp, MaterialTheme.colorScheme.outline.copy(alpha = 0.2f)),
-                                        modifier = Modifier
-                                            .width(210.dp)
-                                            .clip(RoundedCornerShape(16.dp))
-                                            .clickable { onOpenAttraction(fav) }
-                                            .testTag("reviews_profile_favorite_${fav.id}")
-                                    ) {
-                                        Row(
-                                            modifier = Modifier.padding(8.dp),
-                                            verticalAlignment = Alignment.CenterVertically
-                                        ) {
-                                            AttractionCoverImage(
-                                                attraction = fav,
-                                                contentDescription = fav.name.get(language),
-                                                modifier = Modifier
-                                                    .size(48.dp)
-                                                    .clip(RoundedCornerShape(12.dp)),
-                                                contentScale = ContentScale.Crop
+                                        Spacer(modifier = Modifier.width(8.dp))
+                                        Column(modifier = Modifier.weight(1f)) {
+                                            Text(
+                                                text = fav.name.get(language),
+                                                style = MaterialTheme.typography.labelLarge,
+                                                maxLines = 1,
+                                                overflow = TextOverflow.Ellipsis
                                             )
-                                            Spacer(modifier = Modifier.width(8.dp))
-                                            Column(modifier = Modifier.weight(1f)) {
-                                                Text(
-                                                    text = fav.name.get(language),
-                                                    style = MaterialTheme.typography.labelLarge,
-                                                    maxLines = 1,
-                                                    overflow = TextOverflow.Ellipsis
-                                                )
-                                                Text(
-                                                    text = "Brgy. ${fav.barangay}",
-                                                    style = MaterialTheme.typography.labelSmall,
-                                                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                                                    maxLines = 1,
-                                                    overflow = TextOverflow.Ellipsis
-                                                )
-                                            }
-                                            IconButton(
-                                                onClick = { onToggleFavorite(fav) },
-                                                modifier = Modifier.minimumInteractiveComponentSize()
-                                            ) {
-                                                Icon(
-                                                    imageVector = Icons.Default.Favorite,
-                                                    contentDescription = "Remove favorite",
-                                                    tint = Color(0xFFE11D48),
-                                                    modifier = Modifier.size(18.dp)
-                                                )
-                                            }
+                                            Text(
+                                                text = "Brgy. ${fav.barangay}",
+                                                style = MaterialTheme.typography.labelSmall,
+                                                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                                maxLines = 1,
+                                                overflow = TextOverflow.Ellipsis
+                                            )
+                                        }
+                                        IconButton(
+                                            onClick = { onToggleFavorite(fav) },
+                                            modifier = Modifier.minimumInteractiveComponentSize()
+                                        ) {
+                                            Icon(
+                                                imageVector = Icons.Default.Favorite,
+                                                contentDescription = "Remove favorite",
+                                                tint = Color(0xFFE11D48),
+                                                modifier = Modifier.size(18.dp)
+                                            )
                                         }
                                     }
                                 }
@@ -326,15 +190,28 @@ fun CommunityReviewsScreen(
             LazyRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                 item {
                     FilterChip(
-                        selected = filterAttractionId == null,
-                        onClick = { filterAttractionId = null },
+                        selected = filterAttractionId == null && !myReviewsOnly,
+                        onClick = {
+                            filterAttractionId = null
+                            myReviewsOnly = false
+                        },
                         label = { Text("All Spots") }
+                    )
+                }
+                item {
+                    FilterChip(
+                        selected = myReviewsOnly,
+                        onClick = { myReviewsOnly = !myReviewsOnly },
+                        label = { Text("My Reviews") },
+                        modifier = Modifier.testTag("filter_my_reviews_chip")
                     )
                 }
                 items(attractions, key = { it.id }) { attraction ->
                     FilterChip(
                         selected = filterAttractionId == attraction.id,
-                        onClick = { filterAttractionId = attraction.id },
+                        onClick = {
+                            filterAttractionId = if (filterAttractionId == attraction.id) null else attraction.id
+                        },
                         label = { Text(attraction.name.get(language)) }
                     )
                 }
@@ -364,8 +241,10 @@ fun CommunityReviewsScreen(
                 }
             }
             is UiState.Success -> {
-                val filtered = reviewsState.data.filter {
-                    filterAttractionId == null || it.attractionId == filterAttractionId
+                val filtered = reviewsState.data.filter { review ->
+                    val matchesAttraction = filterAttractionId == null || review.attractionId == filterAttractionId
+                    val matchesMine = !myReviewsOnly || review.userId == currentUserId
+                    matchesAttraction && matchesMine
                 }
                 if (filtered.isEmpty()) {
                     pageSection {
@@ -376,7 +255,10 @@ fun CommunityReviewsScreen(
                             ) {
                                 Icon(Icons.Default.Star, contentDescription = null, tint = MapRatingGold, modifier = Modifier.size(34.dp))
                                 Spacer(modifier = Modifier.height(6.dp))
-                                Text("Be the first to share a tip!", style = MaterialTheme.typography.titleMedium)
+                                Text(
+                                    text = if (myReviewsOnly) "You haven't posted a review yet" else "Be the first to share a tip!",
+                                    style = MaterialTheme.typography.titleMedium
+                                )
                                 Text(
                                     text = "Post trail conditions, habal-habal tips, or highlights from Dumingag.",
                                     style = MaterialTheme.typography.bodySmall,
