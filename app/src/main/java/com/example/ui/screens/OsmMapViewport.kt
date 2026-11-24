@@ -35,6 +35,7 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.statusBarsPadding
 import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.layout.wrapContentWidth
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
@@ -45,6 +46,8 @@ import androidx.compose.material.icons.filled.Layers
 import androidx.compose.material.icons.filled.Map
 import androidx.compose.material.icons.filled.MyLocation
 import androidx.compose.material.icons.filled.Navigation
+import androidx.compose.material.icons.filled.Route
+import androidx.compose.material.icons.filled.ViewInAr
 import androidx.compose.material.icons.filled.ZoomIn
 import androidx.compose.material.icons.filled.ZoomOut
 import androidx.compose.material3.Icon
@@ -56,7 +59,10 @@ import androidx.compose.material3.minimumInteractiveComponentSize
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberUpdatedState
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -64,19 +70,26 @@ import androidx.compose.ui.draw.clipToBounds
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.ImageBitmap
+import androidx.compose.ui.graphics.Path
 import androidx.compose.ui.graphics.PathEffect
 import androidx.compose.ui.graphics.StrokeCap
+import androidx.compose.ui.graphics.StrokeJoin
+import androidx.compose.ui.graphics.drawscope.DrawScope
 import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.layout.ContentScale
+import androidx.compose.ui.layout.onSizeChanged
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.res.painterResource
+import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.IntOffset
 import androidx.compose.ui.unit.IntSize
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.sp
 import com.example.data.DumingagSeedData
 import com.example.data.remote.OsmProjection
 import com.example.data.remote.OsmTileLoader
@@ -84,7 +97,10 @@ import com.example.model.AppLanguage
 import com.example.model.Attraction
 import com.example.model.OfflineMapNode
 import com.example.model.OfflineRoutePlan
+import com.example.model.TravelMode
 import com.example.ui.components.AttractionCoverImage
+import com.example.ui.components.AttractionReviewSummary
+import com.example.ui.components.MapPinStarBadge
 import com.example.ui.theme.MapContourRing
 import com.example.ui.theme.MapHighwayCasing
 import com.example.ui.theme.MapHighwayFill
@@ -96,12 +112,15 @@ import com.example.ui.theme.MapUserPin
 import com.example.ui.theme.MapUserPulse
 import kotlinx.coroutines.launch
 import kotlin.math.atan
+import kotlin.math.atan2
 import kotlin.math.ceil
 import kotlin.math.cos
 import kotlin.math.floor
+import kotlin.math.hypot
 import kotlin.math.log2
 import kotlin.math.pow
 import kotlin.math.roundToInt
+import kotlin.math.sin
 import kotlin.math.sinh
 
 private const val MIN_MAP_ZOOM = 9.5f
@@ -124,7 +143,9 @@ fun OsmMapViewport(
     language: AppLanguage,
     attractions: List<Attraction>,
     selectedAttraction: Attraction?,
+    markedAttractions: List<Attraction> = listOfNotNull(selectedAttraction),
     activeRoute: OfflineRoutePlan?,
+    travelMode: TravelMode = TravelMode.HABAL_HABAL,
     userLatLon: Pair<Double, Double>,
     centerLat: Double,
     centerLon: Double,
@@ -155,8 +176,13 @@ fun OsmMapViewport(
     onToggleJunctions: () -> Unit,
     onToggleContours: () -> Unit,
     onCloseLayers: () -> Unit,
+    is3DMode: Boolean = false,
+    onToggle3DMode: () -> Unit = {},
+    reviewSummaries: Map<String, AttractionReviewSummary> = emptyMap(),
+    onOpenAttractionReviews: (Attraction) -> Unit = {},
     modifier: Modifier = Modifier
 ) {
+    var showCompassHud by remember { mutableStateOf(false) }
     val pulseTransition = rememberInfiniteTransition(label = "gpsPulse")
     val gpsPulseScale by pulseTransition.animateFloat(
         initialValue = 1.0f,
@@ -166,6 +192,15 @@ fun OsmMapViewport(
             repeatMode = RepeatMode.Reverse
         ),
         label = "gpsPulseScale"
+    )
+    val connectionDashPhase by pulseTransition.animateFloat(
+        initialValue = 0f,
+        targetValue = -28f,
+        animationSpec = infiniteRepeatable(
+            animation = tween(durationMillis = 1200, easing = LinearEasing),
+            repeatMode = RepeatMode.Restart
+        ),
+        label = "connectionDashPhase"
     )
 
     val containerShape = if (isFullscreen) RoundedCornerShape(0.dp) else RoundedCornerShape(24.dp)
@@ -379,33 +414,111 @@ fun OsmMapViewport(
                         }
                     }
 
-                    if (activeRoute != null && activeRoute.nodePathIds.size >= 2) {
-                        for (i in 0 until activeRoute.nodePathIds.size - 1) {
-                            val n1 = nodesById[activeRoute.nodePathIds[i]] ?: continue
-                            val n2 = nodesById[activeRoute.nodePathIds[i + 1]] ?: continue
-                            val p1 = latLonToScreen(n1.latitude, n1.longitude)
-                            val p2 = latLonToScreen(n2.latitude, n2.longitude)
+                    val userPt = latLonToScreen(userLatLon.first, userLatLon.second)
+                    val effectiveMarks = markedAttractions.ifEmpty { listOfNotNull(selectedAttraction) }
+                    val connectionPoints = buildPointToPointOffsets(
+                        userPt = userPt,
+                        activeRoute = activeRoute,
+                        markedAttractions = effectiveMarks,
+                        nodesById = nodesById,
+                        latLonToScreen = ::latLonToScreen
+                    )
+
+                    if (connectionPoints.size >= 2) {
+                        val isGuidedRoute = activeRoute != null && activeRoute.nodePathIds.isNotEmpty()
+                        val lineColor = if (isGuidedRoute) MapRouteCore else MapUserPin
+                        val selectedPinRadiusPx = 27.dp.toPx()
+
+                        for (i in 0 until connectionPoints.size - 1) {
+                            val p1 = connectionPoints[i]
+                            val p2 = connectionPoints[i + 1]
+                            val dx = p2.x - p1.x
+                            val dy = p2.y - p1.y
+                            val segLen = hypot(dx, dy)
+                            if (segLen < 1f) continue
+
                             drawLine(
                                 color = MapRouteGlow,
                                 start = p1,
                                 end = p2,
-                                strokeWidth = 12.dp.toPx(),
+                                strokeWidth = 11.dp.toPx(),
                                 cap = StrokeCap.Round
                             )
                             drawLine(
-                                color = MapRouteCore,
+                                color = Color.White.copy(alpha = 0.92f),
                                 start = p1,
                                 end = p2,
-                                strokeWidth = 5.5.dp.toPx(),
-                                cap = StrokeCap.Round,
-                                pathEffect = PathEffect.dashPathEffect(floatArrayOf(18f, 10f), 0f)
+                                strokeWidth = 6.5.dp.toPx(),
+                                cap = StrokeCap.Round
                             )
-                            drawCircle(color = Color.White, radius = 5.dp.toPx(), center = p1)
-                            drawCircle(color = MapRouteCore, radius = 3.2.dp.toPx(), center = p1)
+                            drawLine(
+                                color = lineColor,
+                                start = p1,
+                                end = p2,
+                                strokeWidth = 4.2.dp.toPx(),
+                                cap = StrokeCap.Round,
+                                pathEffect = PathEffect.dashPathEffect(floatArrayOf(18f, 10f), connectionDashPhase)
+                            )
+
+                            val angleRad = atan2(dy, dx)
+                            val isLastSegment = i == connectionPoints.size - 2
+                            val pointsIntoLandmarkPin = !isGuidedRoute || isLastSegment
+
+                            // Mid-segment directional pointer on longer segments
+                            if (segLen >= 115.dp.toPx()) {
+                                val midT = if (pointsIntoLandmarkPin) 0.42f else 0.55f
+                                val midTip = Offset(p1.x + dx * midT, p1.y + dy * midT)
+                                drawDirectionalArrowHead(
+                                    tip = midTip,
+                                    directionAngleRad = angleRad,
+                                    arrowLengthPx = 11.dp.toPx(),
+                                    arrowHalfWidthPx = 6.5.dp.toPx(),
+                                    fillColor = lineColor
+                                )
+                            }
+
+                            // Crisp pointer arrowhead aimed directly into each marked landmark pin rim
+                            if (pointsIntoLandmarkPin && segLen > selectedPinRadiusPx + 12.dp.toPx()) {
+                                val ux = dx / segLen
+                                val uy = dy / segLen
+                                val tipOffset = Offset(
+                                    x = p2.x - ux * (selectedPinRadiusPx + 3.dp.toPx()),
+                                    y = p2.y - uy * (selectedPinRadiusPx + 3.dp.toPx())
+                                )
+                                drawDirectionalArrowHead(
+                                    tip = tipOffset,
+                                    directionAngleRad = angleRad,
+                                    arrowLengthPx = 13.dp.toPx(),
+                                    arrowHalfWidthPx = 8.dp.toPx(),
+                                    fillColor = lineColor
+                                )
+                            }
+                        }
+
+                        if (isGuidedRoute) {
+                            // Highlight intermediate road junction vertices
+                            for (i in 1 until connectionPoints.size - 1) {
+                                val pt = connectionPoints[i]
+                                drawCircle(color = Color.White, radius = 6.dp.toPx(), center = pt)
+                                drawCircle(color = lineColor, radius = 3.8.dp.toPx(), center = pt)
+                            }
+                            drawCircle(
+                                color = lineColor.copy(alpha = 0.22f),
+                                radius = (selectedPinRadiusPx + 7.dp.toPx()),
+                                center = connectionPoints.last()
+                            )
+                        } else {
+                            // Highlight every marked landmark pin anchor halo in the chain
+                            for (i in 1 until connectionPoints.size) {
+                                drawCircle(
+                                    color = lineColor.copy(alpha = 0.22f),
+                                    radius = (selectedPinRadiusPx + 7.dp.toPx()),
+                                    center = connectionPoints[i]
+                                )
+                            }
                         }
                     }
 
-                    val userPt = latLonToScreen(userLatLon.first, userLatLon.second)
                     drawCircle(
                         color = MapUserPulse,
                         radius = (15.dp * gpsPulseScale).toPx(),
@@ -420,20 +533,31 @@ fun OsmMapViewport(
             if (showElevationAndHubs && zoomLevel < 12.3f) {
                 RegionalZdsHubs.forEach { hub ->
                     val pt = latLonToScreen(hub.lat, hub.lon)
-                    Surface(
-                        color = MaterialTheme.colorScheme.secondaryContainer.copy(alpha = 0.92f),
-                        shape = RoundedCornerShape(10.dp),
-                        border = BorderStroke(1.dp, MaterialTheme.colorScheme.secondary.copy(alpha = 0.4f)),
-                        modifier = Modifier.offset {
-                            IntOffset(pt.x.roundToInt() - 40, pt.y.roundToInt() - 14)
-                        }
+                    Box(
+                        modifier = Modifier
+                            .offset {
+                                IntOffset(pt.x.roundToInt(), pt.y.roundToInt() - with(density) { 14.dp.roundToPx() })
+                            }
+                            .width(0.dp)
                     ) {
-                        Text(
-                            text = hub.name,
-                            style = MaterialTheme.typography.labelSmall,
-                            color = MaterialTheme.colorScheme.onSecondaryContainer,
-                            modifier = Modifier.padding(horizontal = 7.dp, vertical = 3.dp)
-                        )
+                        Surface(
+                            color = MaterialTheme.colorScheme.secondaryContainer.copy(alpha = 0.92f),
+                            shape = RoundedCornerShape(10.dp),
+                            border = BorderStroke(1.dp, MaterialTheme.colorScheme.secondary.copy(alpha = 0.4f)),
+                            modifier = Modifier.wrapContentWidth(
+                                align = Alignment.CenterHorizontally,
+                                unbounded = true
+                            )
+                        ) {
+                            Text(
+                                text = hub.name,
+                                style = MaterialTheme.typography.labelSmall,
+                                color = MaterialTheme.colorScheme.onSecondaryContainer,
+                                maxLines = 1,
+                                softWrap = false,
+                                modifier = Modifier.padding(horizontal = 7.dp, vertical = 3.dp)
+                            )
+                        }
                     }
                 }
             }
@@ -457,12 +581,58 @@ fun OsmMapViewport(
                 }
             }
 
-            // Landmark Photo Pins
-            attractions.forEach { attraction ->
+            // Landmark Photo Pins — anchored pixel-exact on (screenPos.x, screenPos.y)
+            // Zoom-aware anti-overlap decluttering: selected/marked and higher-rated pins get badge priority
+            val effectiveMarks = markedAttractions.ifEmpty { listOfNotNull(selectedAttraction) }
+            val minLabelGapX = with(density) { 86.dp.toPx() }
+            val minLabelGapY = with(density) { 46.dp.toPx() }
+            val applyDeclutter = zoomLevel < 14.2f
+
+            val prioritizedPins = attractions.map { attraction ->
                 val screenPos = latLonToScreen(attraction.latitude, attraction.longitude)
-                val isSelected = selectedAttraction?.id == attraction.id ||
+                val markIndex = effectiveMarks.indexOfFirst { it.id == attraction.id }
+                val isMarked = markIndex >= 0
+                val isSelected = isMarked ||
+                    selectedAttraction?.id == attraction.id ||
                     activeRoute?.destination?.id == attraction.id
-                val pinSizeDp = if (isSelected) 54.dp else 44.dp
+                val summary = reviewSummaries[attraction.id]
+                Triple(attraction, screenPos, Triple(markIndex, isSelected, summary))
+            }.sortedWith(
+                compareByDescending<Triple<Attraction, Offset, Triple<Int, Boolean, AttractionReviewSummary?>>> { it.third.second }
+                    .thenByDescending { it.third.third?.averageRating ?: 0.0 }
+                    .thenByDescending { it.third.third?.reviewCount ?: 0 }
+            )
+
+            val occupiedLabelCenters = mutableListOf<Offset>()
+            val showDecorationsById = mutableMapOf<String, Boolean>()
+            prioritizedPins.forEach { (attraction, screenPos, meta) ->
+                val isSelected = meta.second
+                if (isSelected || !applyDeclutter) {
+                    showDecorationsById[attraction.id] = true
+                    occupiedLabelCenters.add(screenPos)
+                } else {
+                    val collides = occupiedLabelCenters.any { existing ->
+                        kotlin.math.abs(existing.x - screenPos.x) < minLabelGapX &&
+                            kotlin.math.abs(existing.y - screenPos.y) < minLabelGapY
+                    }
+                    if (!collides) {
+                        showDecorationsById[attraction.id] = true
+                        occupiedLabelCenters.add(screenPos)
+                    } else {
+                        showDecorationsById[attraction.id] = false
+                    }
+                }
+            }
+
+            // Render unselected pins first so selected/marked pins sit cleanly on top
+            prioritizedPins.asReversed().forEach { (attraction, screenPos, meta) ->
+                val markIndex = meta.first
+                val isMarked = markIndex >= 0
+                val isSelected = meta.second
+                val reviewSummary = meta.third
+                val showDecorations = showDecorationsById[attraction.id] != false
+
+                val pinSizeDp = if (isSelected) 54.dp else if (showDecorations) 48.dp else 40.dp
                 val halfPinPx = with(density) { (pinSizeDp / 2).roundToPx() }
                 val ringColor = if (isSelected) {
                     MaterialTheme.colorScheme.secondary
@@ -484,43 +654,290 @@ fun OsmMapViewport(
                                 y = screenPos.y.roundToInt() - halfPinPx
                             )
                         }
-                        .clickable { onSelectAttraction(attraction) }
-                        .testTag("map_pin_${attraction.id}")
+                        .width(pinSizeDp)
                 ) {
-                    Box(
+                    Column(
+                        horizontalAlignment = Alignment.CenterHorizontally,
                         modifier = Modifier
-                            .size(pinSizeDp)
-                            .clip(CircleShape)
-                            .border(
-                                width = if (isSelected) 3.dp else 2.5.dp,
-                                color = ringColor,
-                                shape = CircleShape
-                            )
-                            .border(
-                                width = 1.dp,
-                                color = Color.White,
-                                shape = CircleShape
-                            )
+                            .clickable { onSelectAttraction(attraction) }
+                            .testTag("map_pin_${attraction.id}")
                     ) {
-                        AttractionCoverImage(
-                            attraction = attraction,
-                            contentDescription = attraction.name.get(language),
-                            modifier = Modifier.fillMaxSize(),
-                            contentScale = ContentScale.Crop
+                        Box(modifier = Modifier.size(pinSizeDp)) {
+                            Box(
+                                modifier = Modifier
+                                    .fillMaxSize()
+                                    .clip(CircleShape)
+                                    .border(
+                                        width = if (isSelected) 3.dp else 2.5.dp,
+                                        color = ringColor,
+                                        shape = CircleShape
+                                    )
+                                    .border(
+                                        width = 1.dp,
+                                        color = Color.White,
+                                        shape = CircleShape
+                                    )
+                            ) {
+                                AttractionCoverImage(
+                                    attraction = attraction,
+                                    contentDescription = attraction.name.get(language),
+                                    modifier = Modifier.fillMaxSize(),
+                                    contentScale = ContentScale.Crop
+                                )
+                            }
+                            if (isMarked && activeRoute == null) {
+                                Box(
+                                    contentAlignment = Alignment.Center,
+                                    modifier = Modifier
+                                        .align(Alignment.TopEnd)
+                                        .size(22.dp)
+                                        .clip(CircleShape)
+                                        .background(MapUserPin)
+                                        .border(1.5.dp, Color.White, CircleShape)
+                                        .semantics { contentDescription = "Stop ${markIndex + 1}" }
+                                        .testTag("map_pin_badge_${attraction.id}")
+                                ) {
+                                    Text(
+                                        text = "${markIndex + 1}",
+                                        style = MaterialTheme.typography.labelSmall,
+                                        color = Color.White,
+                                        fontWeight = FontWeight.ExtraBold
+                                    )
+                                }
+                            } else if (!showDecorations && reviewSummary != null) {
+                                // Compact amber star dot when zoomed out and decluttered
+                                Box(
+                                    contentAlignment = Alignment.Center,
+                                    modifier = Modifier
+                                        .align(Alignment.BottomEnd)
+                                        .size(18.dp)
+                                        .clip(CircleShape)
+                                        .background(Color(0xFFFFB300))
+                                        .border(1.5.dp, Color.White, CircleShape)
+                                        .clickable { onOpenAttractionReviews(attraction) }
+                                        .testTag("map_pin_compact_star_${attraction.id}")
+                                ) {
+                                    Text(
+                                        text = "★",
+                                        style = MaterialTheme.typography.labelSmall,
+                                        color = Color(0xFF1F1600),
+                                        fontWeight = FontWeight.Bold
+                                    )
+                                }
+                            }
+                        }
+                        if (showDecorations) {
+                            Spacer(modifier = Modifier.height(2.dp))
+                            Surface(
+                                color = if (isSelected) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.surface.copy(alpha = 0.94f),
+                                shape = RoundedCornerShape(8.dp),
+                                shadowElevation = 2.dp,
+                                modifier = Modifier.wrapContentWidth(
+                                    align = Alignment.CenterHorizontally,
+                                    unbounded = true
+                                )
+                            ) {
+                                Text(
+                                    text = attraction.name.get(language).split(" ").take(2).joinToString(" "),
+                                    style = MaterialTheme.typography.labelSmall,
+                                    color = if (isSelected) MaterialTheme.colorScheme.onPrimary else MaterialTheme.colorScheme.onSurface,
+                                    maxLines = 1,
+                                    softWrap = false,
+                                    modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp)
+                                )
+                            }
+                        }
+                    }
+
+                    if (reviewSummary != null && showDecorations) {
+                        Spacer(modifier = Modifier.height(3.dp))
+                        MapPinStarBadge(
+                            summary = reviewSummary,
+                            attractionName = attraction.name.get(language),
+                            onClick = { onOpenAttractionReviews(attraction) },
+                            modifier = Modifier.wrapContentWidth(
+                                align = Alignment.CenterHorizontally,
+                                unbounded = true
+                            )
                         )
                     }
-                    Surface(
-                        color = if (isSelected) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.surface.copy(alpha = 0.94f),
-                        shape = RoundedCornerShape(8.dp),
-                        shadowElevation = 2.dp
+                }
+            }
+
+            // Crisp Current-Location Origin Anchor Dot (always visible as Point A even over a nearby town pin)
+            run {
+                val userPt = latLonToScreen(userLatLon.first, userLatLon.second)
+                val dotSize = 18.dp
+                val halfDotPx = with(density) { (dotSize / 2).roundToPx() }
+                Box(
+                    modifier = Modifier
+                        .offset { IntOffset(userPt.x.roundToInt() - halfDotPx, userPt.y.roundToInt() - halfDotPx) }
+                        .size(dotSize)
+                        .clip(CircleShape)
+                        .background(Color.White)
+                        .padding(3.dp)
+                        .clip(CircleShape)
+                        .background(MapUserPin)
+                        .testTag("map_user_origin_dot")
+                )
+            }
+
+            // Floating Distance (km) & Hours (hr) Badges along the Connected Line(s)
+            val minPadX = with(density) { 14.dp.toPx() }
+            val minPadY = with(density) { 58.dp.toPx() }
+            val maxPadY = with(density) { if (hasBottomOverlay) 210.dp.toPx() else 72.dp.toPx() }
+            val perpShiftPx = with(density) { 22.dp.toPx() }
+
+            if (activeRoute != null) {
+                val nodesById = DumingagSeedData.mapNodes.associateBy { it.id }
+                val userPt = latLonToScreen(userLatLon.first, userLatLon.second)
+                val connectionPoints = buildPointToPointOffsets(
+                    userPt = userPt,
+                    activeRoute = activeRoute,
+                    markedAttractions = effectiveMarks,
+                    nodesById = nodesById,
+                    latLonToScreen = ::latLonToScreen
+                )
+                val connectionMetrics = calculateMetricsForDistance(activeRoute.totalDistanceKm, travelMode)
+                val (midPt, tangent) = pointAlongPolylineAtFraction(connectionPoints, 0.5f)
+                val perpX = -tangent.y
+                val perpY = tangent.x
+                val preferredSide = if (perpY <= 0f) 1f else -1f
+                val anchorX = midPt.x + perpX * perpShiftPx * preferredSide
+                val anchorY = midPt.y + perpY * perpShiftPx * preferredSide
+
+                var pillSize by remember { mutableStateOf(IntSize.Zero) }
+                val halfW = if (pillSize.width > 0) pillSize.width / 2f else with(density) { 82.dp.toPx() }
+                val halfH = if (pillSize.height > 0) pillSize.height / 2f else with(density) { 16.dp.toPx() }
+                val clampedX = (anchorX - halfW).coerceIn(
+                    minPadX,
+                    (widthPx - halfW * 2f - minPadX).coerceAtLeast(minPadX)
+                )
+                val clampedY = (anchorY - halfH).coerceIn(
+                    minPadY,
+                    (heightPx - maxPadY).coerceAtLeast(minPadY)
+                )
+
+                Surface(
+                    color = MaterialTheme.colorScheme.surface.copy(alpha = 0.96f),
+                    shape = RoundedCornerShape(50),
+                    border = BorderStroke(1.25.dp, MaterialTheme.colorScheme.primary.copy(alpha = 0.75f)),
+                    shadowElevation = 5.dp,
+                    modifier = Modifier
+                        .offset { IntOffset(clampedX.roundToInt(), clampedY.roundToInt()) }
+                        .onSizeChanged { pillSize = it }
+                        .semantics(mergeDescendants = true) {}
+                        .testTag("map_connection_pill")
+                ) {
+                    Row(
+                        modifier = Modifier.padding(horizontal = 10.dp, vertical = 6.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(5.dp)
                     ) {
-                        Text(
-                            text = attraction.name.get(language).split(" ").take(2).joinToString(" "),
-                            style = MaterialTheme.typography.labelSmall,
-                            color = if (isSelected) MaterialTheme.colorScheme.onPrimary else MaterialTheme.colorScheme.onSurface,
-                            maxLines = 1,
-                            modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp)
+                        Icon(
+                            imageVector = Icons.Default.Route,
+                            contentDescription = null,
+                            tint = MaterialTheme.colorScheme.primary,
+                            modifier = Modifier.size(14.dp)
                         )
+                        Text(
+                            text = "${formatDistanceDisplay(connectionMetrics.distanceKm)} · ${formatTravelHoursSummary(connectionMetrics)}",
+                            style = MaterialTheme.typography.labelSmall,
+                            fontWeight = FontWeight.Bold,
+                            color = MaterialTheme.colorScheme.onSurface,
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis
+                        )
+                    }
+                }
+            } else if (effectiveMarks.isNotEmpty()) {
+                val multiSummary = calculateMultiPointRoute(
+                    userLatLon = userLatLon,
+                    markedAttractions = effectiveMarks,
+                    travelMode = travelMode
+                )
+                val isMultiStop = multiSummary.legs.size > 1
+                val placedPillCenters = mutableListOf<Offset>()
+                val minPillSeparationY = with(density) { 36.dp.toPx() }
+                val minPillSeparationX = with(density) { 148.dp.toPx() }
+                multiSummary.legs.forEach { leg ->
+                    val p1 = latLonToScreen(leg.fromLatLon.first, leg.fromLatLon.second)
+                    val p2 = latLonToScreen(leg.toLatLon.first, leg.toLatLon.second)
+                    val (midPt, tangent) = pointAlongPolylineAtFraction(listOf(p1, p2), 0.5f)
+                    val perpX = -tangent.y
+                    val perpY = tangent.x
+                    val preferredSide = if (perpY <= 0f) 1f else -1f
+                    val anchorX = midPt.x + perpX * perpShiftPx * preferredSide
+                    val anchorY = midPt.y + perpY * perpShiftPx * preferredSide
+
+                    var pillSize by remember(leg.legIndex, leg.toAttraction.id) { mutableStateOf(IntSize.Zero) }
+                    val halfW = if (pillSize.width > 0) pillSize.width / 2f else with(density) { 80.dp.toPx() }
+                    val halfH = if (pillSize.height > 0) pillSize.height / 2f else with(density) { 15.dp.toPx() }
+                    val clampedX = (anchorX - halfW).coerceIn(
+                        minPadX,
+                        (widthPx - halfW * 2f - minPadX).coerceAtLeast(minPadX)
+                    )
+                    val maxAllowedY = (heightPx - maxPadY).coerceAtLeast(minPadY)
+                    var clampedY = (anchorY - halfH).coerceIn(minPadY, maxAllowedY)
+                    for (existing in placedPillCenters) {
+                        val centerX = clampedX + halfW
+                        val centerY = clampedY + halfH
+                        if (kotlin.math.abs(centerX - existing.x) < minPillSeparationX &&
+                            kotlin.math.abs(centerY - existing.y) < minPillSeparationY
+                        ) {
+                            val tryBelow = existing.y + minPillSeparationY - halfH
+                            val tryAbove = existing.y - minPillSeparationY - halfH
+                            clampedY = if (tryBelow <= maxAllowedY) {
+                                tryBelow.coerceIn(minPadY, maxAllowedY)
+                            } else {
+                                tryAbove.coerceIn(minPadY, maxAllowedY)
+                            }
+                        }
+                    }
+                    placedPillCenters.add(Offset(clampedX + halfW, clampedY + halfH))
+
+                    val pillLabel = if (isMultiStop) {
+                        "#${leg.legIndex + 1} · ${formatDistanceDisplay(leg.metrics.distanceKm)} · ${formatHoursDecimal(leg.metrics.estimatedHours)}"
+                    } else {
+                        "${formatDistanceDisplay(leg.metrics.distanceKm)} · ${formatTravelHoursSummary(leg.metrics)}"
+                    }
+                    val pillTag = if (leg.legIndex == 0) {
+                        "map_connection_pill"
+                    } else {
+                        "map_connection_leg_${leg.legIndex}"
+                    }
+
+                    Surface(
+                        color = MaterialTheme.colorScheme.surface.copy(alpha = 0.96f),
+                        shape = RoundedCornerShape(50),
+                        border = BorderStroke(1.25.dp, MapUserPin.copy(alpha = 0.80f)),
+                        shadowElevation = 5.dp,
+                        modifier = Modifier
+                            .offset { IntOffset(clampedX.roundToInt(), clampedY.roundToInt()) }
+                            .onSizeChanged { pillSize = it }
+                            .semantics(mergeDescendants = true) {}
+                            .testTag(pillTag)
+                    ) {
+                        Row(
+                            modifier = Modifier.padding(horizontal = 10.dp, vertical = 6.dp),
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.spacedBy(5.dp)
+                        ) {
+                            Icon(
+                                imageVector = Icons.Default.Route,
+                                contentDescription = null,
+                                tint = MapUserPin,
+                                modifier = Modifier.size(14.dp)
+                            )
+                            Text(
+                                text = pillLabel,
+                                style = MaterialTheme.typography.labelSmall,
+                                fontWeight = FontWeight.Bold,
+                                color = MaterialTheme.colorScheme.onSurface,
+                                maxLines = 1,
+                                overflow = TextOverflow.Ellipsis
+                            )
+                        }
                     }
                 }
             }
@@ -575,6 +992,23 @@ fun OsmMapViewport(
                     overflow = TextOverflow.Ellipsis
                 )
             }
+        }
+
+        AnimatedVisibility(
+            visible = showCompassHud,
+            enter = fadeIn(),
+            exit = fadeOut(),
+            modifier = Modifier
+                .align(Alignment.TopStart)
+                .then(topSafeModifier)
+                .padding(top = 52.dp, start = 10.dp, end = 64.dp)
+        ) {
+            CompassBearingHud(
+                userLatLon = userLatLon,
+                targetAttraction = activeRoute?.destination ?: selectedAttraction,
+                language = language,
+                onClose = { showCompassHud = false }
+            )
         }
 
         // Junction Callout Tooltip if user taps a road/transit node
@@ -654,6 +1088,51 @@ fun OsmMapViewport(
                 }
             }
 
+            Surface(
+                shape = CircleShape,
+                color = if (is3DMode) {
+                    MaterialTheme.colorScheme.primary
+                } else {
+                    MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.96f)
+                },
+                border = BorderStroke(
+                    width = 1.dp,
+                    color = MaterialTheme.colorScheme.primary.copy(alpha = 0.45f)
+                ),
+                shadowElevation = 3.dp
+            ) {
+                IconButton(
+                    onClick = onToggle3DMode,
+                    modifier = Modifier
+                        .minimumInteractiveComponentSize()
+                        .testTag("map_3d_toggle_button")
+                ) {
+                    Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                        Icon(
+                            imageVector = Icons.Default.ViewInAr,
+                            contentDescription = "Switch to 3D holographic slab view",
+                            tint = if (is3DMode) {
+                                MaterialTheme.colorScheme.onPrimary
+                            } else {
+                                MaterialTheme.colorScheme.primary
+                            },
+                            modifier = Modifier.size(18.dp)
+                        )
+                        Text(
+                            text = "3D",
+                            style = MaterialTheme.typography.labelSmall,
+                            fontSize = 9.sp,
+                            fontWeight = FontWeight.ExtraBold,
+                            color = if (is3DMode) {
+                                MaterialTheme.colorScheme.onPrimary
+                            } else {
+                                MaterialTheme.colorScheme.primary
+                            }
+                        )
+                    }
+                }
+            }
+
             if (isFullscreen) {
                 Surface(
                     shape = CircleShape,
@@ -705,6 +1184,28 @@ fun OsmMapViewport(
                         .testTag("map_zoom_out_button")
                 ) {
                     Icon(Icons.Default.ZoomOut, contentDescription = "Zoom out")
+                }
+            }
+            Surface(
+                shape = CircleShape,
+                color = if (showCompassHud) {
+                    MaterialTheme.colorScheme.primary
+                } else {
+                    MaterialTheme.colorScheme.surface.copy(alpha = 0.95f)
+                },
+                shadowElevation = 2.dp
+            ) {
+                IconButton(
+                    onClick = { showCompassHud = !showCompassHud },
+                    modifier = Modifier
+                        .minimumInteractiveComponentSize()
+                        .testTag("map_compass_toggle_button")
+                ) {
+                    Icon(
+                        imageVector = Icons.Default.Explore,
+                        contentDescription = if (showCompassHud) "Hide live compass HUD" else "Show live compass HUD",
+                        tint = if (showCompassHud) MaterialTheme.colorScheme.onPrimary else MaterialTheme.colorScheme.primary
+                    )
                 }
             }
             Surface(
@@ -822,3 +1323,130 @@ fun OsmMapViewport(
         }
     }
 }
+
+/**
+ * Builds deduplicated screen-space polyline vertices connecting [userPt] point-to-point
+ * either through every guided waypoint in [activeRoute] to its destination, or sequentially
+ * across all [markedAttractions] (`userPt -> stop[0] -> stop[1] -> ...`).
+ */
+internal fun buildPointToPointOffsets(
+    userPt: Offset,
+    activeRoute: OfflineRoutePlan?,
+    markedAttractions: List<Attraction>,
+    nodesById: Map<String, OfflineMapNode>,
+    latLonToScreen: (Double, Double) -> Offset,
+    minPointSpacingPx: Float = 4f
+): List<Offset> {
+    val rawPoints = mutableListOf<Offset>()
+    if (activeRoute != null && activeRoute.nodePathIds.isNotEmpty()) {
+        rawPoints.add(userPt)
+        activeRoute.nodePathIds.forEach { nodeId ->
+            nodesById[nodeId]?.let { node ->
+                rawPoints.add(latLonToScreen(node.latitude, node.longitude))
+            }
+        }
+        rawPoints.add(
+            latLonToScreen(
+                activeRoute.destination.latitude,
+                activeRoute.destination.longitude
+            )
+        )
+    } else if (markedAttractions.isNotEmpty()) {
+        rawPoints.add(userPt)
+        markedAttractions.forEach { spot ->
+            rawPoints.add(latLonToScreen(spot.latitude, spot.longitude))
+        }
+    }
+
+    if (rawPoints.isEmpty()) return emptyList()
+    val deduped = mutableListOf(rawPoints.first())
+    for (i in 1 until rawPoints.size) {
+        val candidate = rawPoints[i]
+        val isFinal = i == rawPoints.lastIndex
+        val dist = hypot(candidate.x - deduped.last().x, candidate.y - deduped.last().y)
+        if (dist >= minPointSpacingPx || (isFinal && deduped.size == 1 && dist >= 1f)) {
+            deduped.add(candidate)
+        } else if (isFinal && deduped.size >= 2) {
+            deduped[deduped.lastIndex] = candidate
+        }
+    }
+    return deduped
+}
+
+/**
+ * Finds the point and unit tangent vector at [fraction] (0f..1f) of total polyline arc length.
+ */
+internal fun pointAlongPolylineAtFraction(
+    points: List<Offset>,
+    fraction: Float
+): Pair<Offset, Offset> {
+    if (points.isEmpty()) return Offset.Zero to Offset(1f, 0f)
+    if (points.size == 1) return points.first() to Offset(1f, 0f)
+
+    val lengths = FloatArray(points.size - 1)
+    var totalLen = 0f
+    for (i in 0 until points.size - 1) {
+        val len = hypot(points[i + 1].x - points[i].x, points[i + 1].y - points[i].y)
+        lengths[i] = len
+        totalLen += len
+    }
+    if (totalLen < 1f) return points.first() to Offset(1f, 0f)
+
+    val target = totalLen * fraction.coerceIn(0f, 1f)
+    var acc = 0f
+    for (i in lengths.indices) {
+        val segLen = lengths[i]
+        if (acc + segLen >= target && segLen > 0f) {
+            val t = ((target - acc) / segLen).coerceIn(0f, 1f)
+            val p1 = points[i]
+            val p2 = points[i + 1]
+            val pt = Offset(p1.x + (p2.x - p1.x) * t, p1.y + (p2.y - p1.y) * t)
+            val tangent = Offset((p2.x - p1.x) / segLen, (p2.y - p1.y) / segLen)
+            return pt to tangent
+        }
+        acc += segLen
+    }
+    val p1 = points[points.size - 2]
+    val p2 = points.last()
+    val segLen = hypot(p2.x - p1.x, p2.y - p1.y).coerceAtLeast(1f)
+    return p2 to Offset((p2.x - p1.x) / segLen, (p2.y - p1.y) / segLen)
+}
+
+/**
+ * Draws a crisp, white-cased directional arrowhead pointing along [directionAngleRad] with its apex at [tip].
+ */
+private fun DrawScope.drawDirectionalArrowHead(
+    tip: Offset,
+    directionAngleRad: Float,
+    arrowLengthPx: Float,
+    arrowHalfWidthPx: Float,
+    fillColor: Color,
+    casingColor: Color = Color.White
+) {
+    val cosA = cos(directionAngleRad)
+    val sinA = sin(directionAngleRad)
+    val baseCenterX = tip.x - cosA * arrowLengthPx
+    val baseCenterY = tip.y - sinA * arrowLengthPx
+    val notchX = tip.x - cosA * (arrowLengthPx * 0.72f)
+    val notchY = tip.y - sinA * (arrowLengthPx * 0.72f)
+    val perpX = -sinA * arrowHalfWidthPx
+    val perpY = cosA * arrowHalfWidthPx
+
+    val arrowPath = Path().apply {
+        moveTo(tip.x, tip.y)
+        lineTo(baseCenterX + perpX, baseCenterY + perpY)
+        lineTo(notchX, notchY)
+        lineTo(baseCenterX - perpX, baseCenterY - perpY)
+        close()
+    }
+    drawPath(
+        path = arrowPath,
+        color = casingColor,
+        style = Stroke(width = 3.dp.toPx(), join = StrokeJoin.Round)
+    )
+    drawPath(
+        path = arrowPath,
+        color = fillColor
+    )
+}
+

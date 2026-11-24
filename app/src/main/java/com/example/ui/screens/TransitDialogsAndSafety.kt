@@ -56,6 +56,8 @@ import com.example.model.EmergencyContact
 import com.example.model.TransitMethod
 import com.example.model.TransitModeCategory
 import com.example.model.TransitServiceStatus
+import com.example.ui.components.liquidGlassBorder
+import com.example.ui.components.liquidGlassCardColors
 
 @Composable
 fun TravelAlertsCard(
@@ -64,9 +66,13 @@ fun TravelAlertsCard(
     modifier: Modifier = Modifier
 ) {
     Card(
-        shape = RoundedCornerShape(22.dp),
-        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.secondaryContainer),
-        border = BorderStroke(1.dp, MaterialTheme.colorScheme.secondary.copy(alpha = 0.25f)),
+        shape = RoundedCornerShape(24.dp),
+        colors = liquidGlassCardColors(
+            baseColor = MaterialTheme.colorScheme.secondaryContainer,
+            lightAlpha = 0.84f,
+            darkAlpha = 0.78f
+        ),
+        border = liquidGlassBorder(),
         modifier = modifier.fillMaxWidth()
     ) {
         Column(
@@ -171,23 +177,30 @@ fun EmergencyContactCard(
     modifier: Modifier = Modifier
 ) {
     val isCritical = contact.priorityLevel == "CRITICAL" || contact.priorityLevel == "HIGH"
+    val isCriticalCard = contact.priorityLevel == "CRITICAL"
+    val primaryTextColor = if (isCriticalCard) MaterialTheme.colorScheme.onErrorContainer else MaterialTheme.colorScheme.onSurface
+    val secondaryTextColor = if (isCriticalCard) {
+        MaterialTheme.colorScheme.onErrorContainer.copy(alpha = 0.84f)
+    } else {
+        MaterialTheme.colorScheme.onSurfaceVariant
+    }
     Card(
-        shape = RoundedCornerShape(20.dp),
-        colors = CardDefaults.cardColors(
-            containerColor = if (contact.priorityLevel == "CRITICAL") {
-                MaterialTheme.colorScheme.errorContainer.copy(alpha = 0.65f)
-            } else {
-                MaterialTheme.colorScheme.surface
-            }
-        ),
-        border = BorderStroke(
-            width = 1.dp,
-            color = if (isCritical) {
-                MaterialTheme.colorScheme.error.copy(alpha = 0.25f)
-            } else {
-                MaterialTheme.colorScheme.outline.copy(alpha = 0.22f)
-            }
-        ),
+        shape = RoundedCornerShape(22.dp),
+        colors = if (isCriticalCard) {
+            liquidGlassCardColors(
+                baseColor = MaterialTheme.colorScheme.errorContainer,
+                lightAlpha = 0.82f,
+                darkAlpha = 0.84f
+            )
+        } else {
+            liquidGlassCardColors()
+        },
+        elevation = CardDefaults.cardElevation(defaultElevation = 0.dp),
+        border = if (isCritical) {
+            BorderStroke(1.2.dp, MaterialTheme.colorScheme.error.copy(alpha = 0.36f))
+        } else {
+            liquidGlassBorder()
+        },
         modifier = modifier.fillMaxWidth()
     ) {
         Column(
@@ -201,7 +214,7 @@ fun EmergencyContactCard(
                 verticalAlignment = Alignment.Top
             ) {
                 Surface(
-                    color = if (isCritical) MaterialTheme.colorScheme.errorContainer else MaterialTheme.colorScheme.tertiaryContainer,
+                    color = if (isCritical) MaterialTheme.colorScheme.error.copy(alpha = 0.16f) else MaterialTheme.colorScheme.tertiaryContainer,
                     shape = RoundedCornerShape(14.dp),
                     modifier = Modifier.size(44.dp)
                 ) {
@@ -217,12 +230,13 @@ fun EmergencyContactCard(
                     Text(
                         text = contact.title.get(language),
                         style = MaterialTheme.typography.titleSmall,
-                        color = MaterialTheme.colorScheme.onSurface
+                        fontWeight = FontWeight.Bold,
+                        color = primaryTextColor
                     )
                     Text(
                         text = "${contact.department} · ${contact.availability}",
                         style = MaterialTheme.typography.bodySmall,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                        color = secondaryTextColor
                     )
                     Text(
                         text = contact.phoneNumber,
@@ -234,7 +248,7 @@ fun EmergencyContactCard(
                         Text(
                             text = mail,
                             style = MaterialTheme.typography.labelSmall,
-                            color = MaterialTheme.colorScheme.secondary,
+                            color = if (isCriticalCard) primaryTextColor else MaterialTheme.colorScheme.secondary,
                             maxLines = 1,
                             overflow = TextOverflow.Ellipsis
                         )

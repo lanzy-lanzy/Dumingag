@@ -29,9 +29,11 @@ import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.AdminPanelSettings
 import androidx.compose.material.icons.filled.Language
 import androidx.compose.material.icons.filled.Refresh
+import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.material3.Button
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
+import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.FilledTonalButton
 import androidx.compose.material3.FilterChip
 import androidx.compose.material3.FilterChipDefaults
@@ -39,6 +41,7 @@ import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.Text
+import androidx.compose.material3.pulltorefresh.PullToRefreshBox
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
@@ -50,15 +53,27 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.unit.dp
 import androidx.core.content.ContextCompat
+import androidx.compose.foundation.layout.Row
+import androidx.compose.material.icons.filled.CloudDone
+import androidx.compose.material.icons.filled.CloudOff
+import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextOverflow
+import com.example.data.DumingagSeedData
+import com.example.data.local.TravelGuideCacheStatus
 import com.example.localization.AppStrings
 import com.example.model.AppLanguage
+import com.example.model.Attraction
 import com.example.model.EmergencyContact
 import com.example.model.TransitMethod
 import com.example.model.TransitModeCategory
 import com.example.model.UiState
 import com.example.notifications.TravelAlertManager
+import com.example.ui.components.LiquidGlassSurface
+import java.text.SimpleDateFormat
+import java.util.Date
+import java.util.Locale
 
-@OptIn(ExperimentalLayoutApi::class)
+@OptIn(ExperimentalLayoutApi::class, ExperimentalMaterial3Api::class)
 @Composable
 fun TransitSafetyScreen(
     language: AppLanguage,
@@ -66,7 +81,10 @@ fun TransitSafetyScreen(
     emergencyContacts: List<EmergencyContact>,
     isAdmin: Boolean,
     isEffectiveOffline: Boolean,
+    isRefreshing: Boolean = false,
+    cacheStatus: TravelGuideCacheStatus? = null,
     onRefreshTransit: () -> Unit,
+    onRefreshAll: () -> Unit = onRefreshTransit,
     onManageEmergencyContacts: () -> Unit,
     onAddTransitMethod: (
         name: String,
@@ -94,7 +112,9 @@ fun TransitSafetyScreen(
         serviceStatus: String
     ) -> Unit,
     onDeleteTransitMethod: (String) -> Unit,
-    onShowMessage: (String) -> Unit
+    onShowMessage: (String) -> Unit,
+    attractions: List<Attraction> = DumingagSeedData.attractions,
+    userLatLon: Pair<Double, Double> = DumingagSeedData.CENTER_LAT to DumingagSeedData.CENTER_LON
 ) {
     val context = LocalContext.current
     var pendingAlertAction by remember { mutableStateOf<(() -> Unit)?>(null) }
@@ -135,6 +155,13 @@ fun TransitSafetyScreen(
     }
 
     val routeCount = (transitState as? UiState.Success)?.data?.size
+    PullToRefreshBox(
+        isRefreshing = isRefreshing,
+        onRefresh = onRefreshAll,
+        modifier = Modifier
+            .fillMaxSize()
+            .testTag("transit_pull_to_refresh")
+    ) {
     TravelPageGrid("transit_page") {
         pageSection {
             TravelPageHeader(
@@ -149,6 +176,58 @@ fun TransitSafetyScreen(
                 if (isAdmin) TravelHeaderAction("Add route", Icons.Default.Add, "transit_add_button") {
                     editingMethod = null
                     showTransitDialog = true
+                }
+            }
+        }
+
+        if (cacheStatus != null && cacheStatus.isReadyOffline) {
+            pageSection {
+                val syncedTimeLabel = remember(cacheStatus.lastUpdatedAtMillis) {
+                    if (cacheStatus.lastUpdatedAtMillis > 0L) {
+                        SimpleDateFormat("MMM d, h:mm a", Locale.getDefault())
+                            .format(Date(cacheStatus.lastUpdatedAtMillis))
+                    } else {
+                        null
+                    }
+                }
+                val summaryText = buildString {
+                    append(if (isEffectiveOffline) "Offline Cache Active" else "Cached Offline")
+                    append(" · ")
+                    append("${cacheStatus.transitCount} routes & ${cacheStatus.emergencyContactCount} emergency hotlines")
+                    if (syncedTimeLabel != null) {
+                        append(" · ")
+                        append(syncedTimeLabel)
+                    }
+                }
+                LiquidGlassSurface(
+                    cornerRadius = 18.dp,
+                    elevation = 3.dp,
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .testTag("transit_offline_cache_badge")
+                ) {
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(horizontal = 14.dp, vertical = 10.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(8.dp)
+                    ) {
+                        Icon(
+                            imageVector = if (isEffectiveOffline) Icons.Default.CloudOff else Icons.Default.CloudDone,
+                            contentDescription = if (isEffectiveOffline) "Offline cache active" else "Offline cache synced",
+                            tint = if (isEffectiveOffline) MaterialTheme.colorScheme.secondary else MaterialTheme.colorScheme.primary,
+                            modifier = Modifier.size(18.dp)
+                        )
+                        Text(
+                            text = summaryText,
+                            style = MaterialTheme.typography.labelMedium,
+                            fontWeight = FontWeight.Medium,
+                            color = MaterialTheme.colorScheme.onSurface,
+                            maxLines = 2,
+                            overflow = TextOverflow.Ellipsis
+                        )
+                    }
                 }
             }
         }
@@ -325,6 +404,27 @@ fun TransitSafetyScreen(
         }
 
         pageSection {
+            HabalHabalFareEstimatorCard(
+                language = language,
+                attractions = attractions,
+                userLatLon = userLatLon
+            )
+        }
+
+        pageSection {
+            OfflinePhrasebookCard(onShowMessage = onShowMessage)
+        }
+
+        pageSection {
+            EmergencySosSmsCard(
+                userLatLon = userLatLon,
+                attractions = attractions,
+                emergencyContacts = emergencyContacts,
+                onShowMessage = onShowMessage
+            )
+        }
+
+        pageSection {
             Spacer(modifier = Modifier.height(6.dp))
             FlowRow(
                 modifier = Modifier.fillMaxWidth(),
@@ -421,6 +521,7 @@ fun TransitSafetyScreen(
                 }
             )
         }
+    }
     }
 
     if (isAdmin && showTransitDialog) {

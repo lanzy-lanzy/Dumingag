@@ -46,6 +46,7 @@ import androidx.compose.material.icons.filled.Translate
 import androidx.compose.material.icons.filled.VerifiedUser
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
+import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.FilledTonalButton
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
@@ -58,6 +59,13 @@ import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.material3.minimumInteractiveComponentSize
 import androidx.compose.foundation.layout.widthIn
+import androidx.annotation.DrawableRes
+import coil.compose.AsyncImage
+import coil.compose.SubcomposeAsyncImage
+import coil.request.CachePolicy
+import coil.request.ImageRequest
+import com.example.util.CloudinaryImageUploader
+import com.example.util.ImageUploadPreset
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
@@ -69,6 +77,10 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.geometry.Size
+import com.example.ui.theme.LocalIsDarkTheme
+import androidx.compose.ui.draw.drawBehind
+import androidx.compose.ui.geometry.CornerRadius
+import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.ImageBitmap
 import androidx.compose.ui.graphics.StrokeCap
@@ -165,13 +177,70 @@ fun GoogleBrandIcon(
 }
 
 fun decodeBase64ImageBitmap(rawBase64: String): ImageBitmap? {
-    if (rawBase64.isBlank()) return null
+    if (rawBase64.isBlank() || CloudinaryImageUploader.isRemoteImageUrl(rawBase64)) return null
     return try {
         val clean = rawBase64.substringAfter("base64,", rawBase64).trim()
         val bytes = Base64.decode(clean, Base64.DEFAULT)
         BitmapFactory.decodeByteArray(bytes, 0, bytes.size)?.asImageBitmap()
     } catch (_: Exception) {
         null
+    }
+}
+
+/**
+ * Renders a photo that may be a Cloudinary HTTPS URL (loaded via Coil with disk/memory caching),
+ * a legacy Base64 string, or falls back to an optional bundled drawable resource.
+ */
+@Composable
+fun TravelPhotoImage(
+    photoData: String,
+    contentDescription: String?,
+    modifier: Modifier = Modifier,
+    contentScale: ContentScale = ContentScale.Crop,
+    @DrawableRes fallbackDrawableRes: Int? = null
+) {
+    val isRemote = remember(photoData) { CloudinaryImageUploader.isRemoteImageUrl(photoData) }
+    val customBitmap = remember(photoData, isRemote) {
+        if (isRemote || photoData.isBlank()) null else decodeBase64ImageBitmap(photoData)
+    }
+
+    when {
+        isRemote -> {
+            val context = LocalContext.current
+            val request = remember(photoData) {
+                ImageRequest.Builder(context)
+                    .data(photoData.trim())
+                    .crossfade(true)
+                    .diskCachePolicy(CachePolicy.ENABLED)
+                    .memoryCachePolicy(CachePolicy.ENABLED)
+                    .build()
+            }
+            val fallbackPainter = fallbackDrawableRes?.let { painterResource(id = it) }
+            AsyncImage(
+                model = request,
+                contentDescription = contentDescription,
+                contentScale = contentScale,
+                placeholder = fallbackPainter,
+                error = fallbackPainter,
+                modifier = modifier
+            )
+        }
+        customBitmap != null -> {
+            Image(
+                bitmap = customBitmap,
+                contentDescription = contentDescription,
+                contentScale = contentScale,
+                modifier = modifier
+            )
+        }
+        fallbackDrawableRes != null -> {
+            Image(
+                painter = painterResource(id = fallbackDrawableRes),
+                contentDescription = contentDescription,
+                contentScale = contentScale,
+                modifier = modifier
+            )
+        }
     }
 }
 
@@ -239,8 +308,23 @@ fun UserAvatar(
     size: Dp = 44.dp,
     modifier: Modifier = Modifier
 ) {
-    val decodedBitmap = remember(photoData) { decodeBase64ImageBitmap(photoData) }
+    val isRemote = remember(photoData) { CloudinaryImageUploader.isRemoteImageUrl(photoData) }
+    val decodedBitmap = remember(photoData, isRemote) {
+        if (isRemote) null else decodeBase64ImageBitmap(photoData)
+    }
     val initial = displayName.trim().firstOrNull()?.uppercaseChar()?.toString() ?: "D"
+
+    @Composable
+    fun InitialFallback() {
+        Box(contentAlignment = Alignment.Center, modifier = Modifier.fillMaxSize()) {
+            Text(
+                text = initial,
+                style = if (size >= 56.dp) MaterialTheme.typography.titleLarge else MaterialTheme.typography.titleMedium,
+                color = MaterialTheme.colorScheme.primary,
+                fontWeight = FontWeight.Bold
+            )
+        }
+    }
 
     Surface(
         shape = CircleShape,
@@ -248,24 +332,39 @@ fun UserAvatar(
         border = BorderStroke(1.5.dp, MaterialTheme.colorScheme.primary.copy(alpha = 0.45f)),
         modifier = modifier.size(size)
     ) {
-        if (decodedBitmap != null) {
-            Image(
-                bitmap = decodedBitmap,
-                contentDescription = "$displayName profile photo",
-                contentScale = ContentScale.Crop,
-                modifier = Modifier
-                    .fillMaxSize()
-                    .clip(CircleShape)
-            )
-        } else {
-            Box(contentAlignment = Alignment.Center, modifier = Modifier.fillMaxSize()) {
-                Text(
-                    text = initial,
-                    style = if (size >= 56.dp) MaterialTheme.typography.titleLarge else MaterialTheme.typography.titleMedium,
-                    color = MaterialTheme.colorScheme.primary,
-                    fontWeight = FontWeight.Bold
+        when {
+            isRemote -> {
+                val context = LocalContext.current
+                val request = remember(photoData) {
+                    ImageRequest.Builder(context)
+                        .data(photoData.trim())
+                        .crossfade(true)
+                        .diskCachePolicy(CachePolicy.ENABLED)
+                        .memoryCachePolicy(CachePolicy.ENABLED)
+                        .build()
+                }
+                SubcomposeAsyncImage(
+                    model = request,
+                    contentDescription = "$displayName profile photo",
+                    contentScale = ContentScale.Crop,
+                    modifier = Modifier
+                        .fillMaxSize()
+                        .clip(CircleShape),
+                    loading = { InitialFallback() },
+                    error = { InitialFallback() }
                 )
             }
+            decodedBitmap != null -> {
+                Image(
+                    bitmap = decodedBitmap,
+                    contentDescription = "$displayName profile photo",
+                    contentScale = ContentScale.Crop,
+                    modifier = Modifier
+                        .fillMaxSize()
+                        .clip(CircleShape)
+                )
+            }
+            else -> InitialFallback()
         }
     }
 }
@@ -277,24 +376,13 @@ fun AttractionCoverImage(
     modifier: Modifier = Modifier,
     contentScale: ContentScale = ContentScale.Crop
 ) {
-    val customBitmap = remember(attraction.photoData) {
-        decodeBase64ImageBitmap(attraction.photoData)
-    }
-    if (customBitmap != null) {
-        Image(
-            bitmap = customBitmap,
-            contentDescription = contentDescription,
-            contentScale = contentScale,
-            modifier = modifier
-        )
-    } else {
-        Image(
-            painter = painterResource(id = attraction.imageRes),
-            contentDescription = contentDescription,
-            contentScale = contentScale,
-            modifier = modifier
-        )
-    }
+    TravelPhotoImage(
+        photoData = attraction.photoData,
+        contentDescription = contentDescription,
+        modifier = modifier,
+        contentScale = contentScale,
+        fallbackDrawableRes = attraction.imageRes
+    )
 }
 
 @OptIn(ExperimentalLayoutApi::class)
@@ -320,6 +408,8 @@ fun EditProfileDialog(
     var name by remember(initialName) { mutableStateOf(initialName) }
     var photoBase64 by remember(initialPhotoData) { mutableStateOf(initialPhotoData) }
     var clearPhoto by remember { mutableStateOf(false) }
+    var isUploadingPhoto by remember { mutableStateOf(false) }
+    var photoUploadNote by remember { mutableStateOf<String?>(null) }
     var validationError by remember { mutableStateOf<String?>(null) }
 
     val photoPickerLauncher = rememberLauncherForActivityResult(
@@ -327,13 +417,25 @@ fun EditProfileDialog(
     ) { uri ->
         if (uri != null) {
             scope.launch {
-                val encoded = encodeUriToCompressedBase64(context, uri, maxPx = 160, quality = 74)
-                if (encoded != null) {
-                    photoBase64 = encoded
-                    clearPhoto = false
-                    validationError = null
-                } else {
-                    validationError = "Could not process selected photo. Try another image."
+                isUploadingPhoto = true
+                photoUploadNote = "Optimizing & uploading to cloud…"
+                validationError = null
+                try {
+                    val result = CloudinaryImageUploader.uploadImage(
+                        context = context,
+                        uri = uri,
+                        preset = ImageUploadPreset.AVATAR
+                    )
+                    if (result != null) {
+                        photoBase64 = result.photoData
+                        clearPhoto = false
+                        photoUploadNote = result.statusMessage
+                    } else {
+                        photoUploadNote = null
+                        validationError = "Could not process selected photo. Try another image."
+                    }
+                } finally {
+                    isUploadingPhoto = false
                 }
             }
         }
@@ -359,14 +461,40 @@ fun EditProfileDialog(
                     onClick = onDismiss
                 )
         )
+        val darkMode = LocalIsDarkTheme.current
+        val dialogShape = RoundedCornerShape(28.dp)
         Surface(
-            shape = RoundedCornerShape(24.dp),
-            color = MaterialTheme.colorScheme.surface,
-            tonalElevation = 6.dp,
-            shadowElevation = 12.dp,
+            shape = dialogShape,
+            color = MaterialTheme.colorScheme.surface.copy(alpha = if (darkMode) 0.90f else 0.94f),
+            contentColor = MaterialTheme.colorScheme.onSurface,
+            border = BorderStroke(
+                width = 1.4.dp,
+                brush = Brush.linearGradient(
+                    colors = if (darkMode) {
+                        listOf(Color.White.copy(alpha = 0.36f), Color.White.copy(alpha = 0.14f))
+                    } else {
+                        listOf(Color.White.copy(alpha = 0.92f), MaterialTheme.colorScheme.primary.copy(alpha = 0.24f))
+                    }
+                )
+            ),
+            tonalElevation = 8.dp,
+            shadowElevation = 18.dp,
             modifier = Modifier
                 .widthIn(max = 520.dp)
                 .fillMaxWidth()
+                .drawBehind {
+                    drawRoundRect(
+                        brush = Brush.verticalGradient(
+                            colors = listOf(
+                                Color.White.copy(alpha = if (darkMode) 0.08f else 0.45f),
+                                Color.Transparent
+                            ),
+                            startY = 0f,
+                            endY = size.height * 0.22f
+                        ),
+                        cornerRadius = CornerRadius(28.dp.toPx(), 28.dp.toPx())
+                    )
+                }
                 .testTag("profile_account_dialog")
         ) {
             Column(modifier = Modifier.fillMaxWidth()) {
@@ -428,22 +556,30 @@ fun EditProfileDialog(
                                 PickVisualMediaRequest(ActivityResultContracts.PickVisualMedia.ImageOnly)
                             )
                         },
+                        enabled = !isUploadingPhoto,
                         contentPadding = PaddingValues(horizontal = 14.dp, vertical = 10.dp),
                         modifier = Modifier
                             .align(Alignment.CenterVertically)
                             .heightIn(min = 48.dp)
                             .testTag("pick_profile_photo_button")
                     ) {
-                        Icon(Icons.Default.AddAPhoto, contentDescription = null, modifier = Modifier.size(16.dp))
-                        Spacer(modifier = Modifier.width(6.dp))
-                        Text("Choose DP", maxLines = 1)
+                        if (isUploadingPhoto) {
+                            CircularProgressIndicator(modifier = Modifier.size(16.dp), strokeWidth = 2.dp)
+                            Spacer(modifier = Modifier.width(6.dp))
+                            Text("Uploading…", maxLines = 1)
+                        } else {
+                            Icon(Icons.Default.AddAPhoto, contentDescription = null, modifier = Modifier.size(16.dp))
+                            Spacer(modifier = Modifier.width(6.dp))
+                            Text("Choose DP", maxLines = 1)
+                        }
                     }
 
-                    if (!clearPhoto && photoBase64.isNotBlank()) {
+                    if (!clearPhoto && photoBase64.isNotBlank() && !isUploadingPhoto) {
                         TextButton(
                             onClick = {
                                 photoBase64 = ""
                                 clearPhoto = true
+                                photoUploadNote = null
                             },
                             modifier = Modifier
                                 .align(Alignment.CenterVertically)
@@ -455,6 +591,14 @@ fun EditProfileDialog(
                             Text("Remove DP", maxLines = 1)
                         }
                     }
+                }
+
+                photoUploadNote?.let { note ->
+                    Text(
+                        text = note,
+                        style = MaterialTheme.typography.labelSmall,
+                        color = MaterialTheme.colorScheme.primary
+                    )
                 }
 
                 Surface(
@@ -526,13 +670,19 @@ fun EditProfileDialog(
                             )
                         }
                     },
+                    enabled = !isUploadingPhoto,
                     shape = RoundedCornerShape(14.dp),
                     modifier = Modifier
                         .fillMaxWidth()
                         .heightIn(min = 48.dp)
                         .testTag("save_profile_button")
                 ) {
-                    Text("Save Profile Changes", fontWeight = FontWeight.SemiBold, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                    Text(
+                        text = if (isUploadingPhoto) "Uploading Photo…" else "Save Profile Changes",
+                        fontWeight = FontWeight.SemiBold,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis
+                    )
                 }
 
                 HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.6f))

@@ -99,7 +99,9 @@ data class Attraction(
     val transitHint: LocalizedText,
     val baseRating: Double,
     val imageKey: String = AttractionImageMapper.keyForRes(imageRes),
-    val photoData: String = ""
+    val photoData: String = "",
+    val categoryCode: String = category.name,
+    val galleryPhotos: List<String> = emptyList()
 )
 
 data class OfflineMapNode(
@@ -262,6 +264,7 @@ data class CloudAttraction(
     val baseRating: Double = 4.7,
     val imageKey: String = "waterfall",
     val photoData: String = "",
+    val galleryPhotos: List<String> = emptyList(),
     val visibility: String = "public",
     @com.google.firebase.firestore.ServerTimestamp val createdAt: Timestamp? = null,
     @com.google.firebase.firestore.ServerTimestamp val updatedAt: Timestamp? = null
@@ -276,6 +279,7 @@ data class CloudAttraction(
         val projY = (1f - ((latitude - 8.12) / 0.09).toFloat()).coerceIn(0.08f, 0.92f)
         val resolvedKey = imageKey.ifBlank { AttractionImageMapper.defaultKeyForCategory(cat) }
 
+        val normalizedCode = CategoryCatalog.normalizeCode(category).ifBlank { cat.name }
         return Attraction(
             id = id,
             mapNodeId = mapNodeId.ifBlank { "node_poblacion" },
@@ -301,8 +305,138 @@ data class CloudAttraction(
             transitHint = LocalizedText(transitHintEn, transitHintEn, transitHintEn, transitHintEn),
             baseRating = baseRating.coerceIn(1.0, 5.0),
             imageKey = resolvedKey,
-            photoData = photoData
+            photoData = photoData,
+            categoryCode = normalizedCode,
+            galleryPhotos = galleryPhotos.filter { it.isNotBlank() }.take(4)
         )
+    }
+}
+
+@Keep
+@IgnoreExtraProperties
+data class ManagedCategory(
+    @DocumentId val id: String = "",
+    val userId: String = "",
+    val code: String = "",
+    val name: String = "",
+    val iconKey: String = "forest",
+    val sortOrder: Long = 0L,
+    val visibility: String = "public",
+    @com.google.firebase.firestore.ServerTimestamp val createdAt: Timestamp? = null,
+    @com.google.firebase.firestore.ServerTimestamp val updatedAt: Timestamp? = null
+) {
+    val effectiveCode: String
+        get() = CategoryCatalog.normalizeCode(code.ifBlank { id })
+}
+
+object CategoryCatalog {
+    val iconOptions: List<Pair<String, String>> = listOf(
+        "forest" to "Nature / Forest",
+        "water" to "Waterfalls / River",
+        "history" to "Historical / Heritage",
+        "palette" to "Cultural / Arts",
+        "landmark" to "Landmark / Plaza",
+        "eco" to "Organic Farm / Eco",
+        "mountain" to "Highlands / Peak",
+        "camp" to "Camping / Resort",
+        "restaurant" to "Food / Cafe",
+        "camera" to "Viewpoint / Scenic"
+    )
+
+    val defaultCategories: List<ManagedCategory> = listOf(
+        ManagedCategory(
+            id = AttractionCategory.NATURE.name,
+            code = AttractionCategory.NATURE.name,
+            name = "Nature",
+            iconKey = "forest",
+            sortOrder = 0L
+        ),
+        ManagedCategory(
+            id = AttractionCategory.HISTORICAL.name,
+            code = AttractionCategory.HISTORICAL.name,
+            name = "Historical",
+            iconKey = "history",
+            sortOrder = 1L
+        ),
+        ManagedCategory(
+            id = AttractionCategory.CULTURAL.name,
+            code = AttractionCategory.CULTURAL.name,
+            name = "Cultural",
+            iconKey = "palette",
+            sortOrder = 2L
+        ),
+        ManagedCategory(
+            id = AttractionCategory.LANDMARK.name,
+            code = AttractionCategory.LANDMARK.name,
+            name = "Landmark",
+            iconKey = "landmark",
+            sortOrder = 3L
+        ),
+        ManagedCategory(
+            id = AttractionCategory.ORGANIC_FARM.name,
+            code = AttractionCategory.ORGANIC_FARM.name,
+            name = "Organic Farm",
+            iconKey = "eco",
+            sortOrder = 4L
+        )
+    )
+
+    private val defaultNamesByCode: Map<String, String> = defaultCategories.associate { it.code to it.name }
+
+    /**
+     * Normalizes a user-typed category name or code into a Firestore-valid uppercase code (`^[A-Z0-9_]{2,40}$`, never `"ALL"`).
+     */
+    fun normalizeCode(raw: String): String {
+        val cleaned = raw.trim()
+            .uppercase()
+            .replace(Regex("[^A-Z0-9]+"), "_")
+            .trim('_')
+            .take(40)
+        return when {
+            cleaned.length < 2 -> ""
+            cleaned == "ALL" -> "CUSTOM_ALL"
+            else -> cleaned
+        }
+    }
+
+    fun isValidCode(code: String): Boolean {
+        return code.length in 2..40 && code != "ALL" && code.matches(Regex("^[A-Z0-9_]+$"))
+    }
+
+    fun defaultImageKeyForCode(code: String, iconKey: String = ""): String {
+        val normalized = normalizeCode(code)
+        return when {
+            normalized == AttractionCategory.HISTORICAL.name ||
+                normalized == AttractionCategory.CULTURAL.name ||
+                iconKey in listOf("history", "palette") -> "heritage"
+            normalized == AttractionCategory.ORGANIC_FARM.name ||
+                iconKey in listOf("eco", "restaurant") -> "organic"
+            normalized == AttractionCategory.LANDMARK.name ||
+                iconKey in listOf("landmark", "mountain", "camera") -> "highland"
+            else -> "waterfall"
+        }
+    }
+
+    fun fallbackEnumForCode(code: String): AttractionCategory {
+        val normalized = normalizeCode(code)
+        return enumValues<AttractionCategory>()
+            .firstOrNull { it.name == normalized && it != AttractionCategory.ALL }
+            ?: AttractionCategory.LANDMARK
+    }
+
+    fun prettyDisplayNameFromCode(code: String): String {
+        return code.trim()
+            .split('_')
+            .filter { it.isNotBlank() }
+            .joinToString(" ") { part ->
+                part.lowercase().replaceFirstChar { it.uppercaseChar() }
+            }
+            .ifBlank { "Attraction" }
+    }
+
+    fun isDefaultNameUnmodified(code: String, name: String): Boolean {
+        val expected = defaultNamesByCode[code] ?: return false
+        return expected.equals(name.trim(), ignoreCase = true)
     }
 }
 
@@ -360,6 +494,53 @@ data class CommunityReview(
     val rating: Long = 5L,
     val comment: String = "",
     val visitTag: String = "Eco-Tour",
+    val photoData: String = "",
+    val verifiedVisit: Boolean = false,
+    val helpfulUserIds: List<String> = emptyList(),
+    val adminReply: String = "",
+    val adminReplyBy: String = "",
+    val visibility: String = "public",
+    @com.google.firebase.firestore.ServerTimestamp val createdAt: Timestamp? = null,
+    @com.google.firebase.firestore.ServerTimestamp val updatedAt: Timestamp? = null
+)
+
+enum class TourismEventType(val code: String, val label: String) {
+    FESTIVAL("FESTIVAL", "Festival"),
+    MARKET_DAY("MARKET_DAY", "Market Day"),
+    TRAIL_ADVISORY("TRAIL_ADVISORY", "Trail Advisory"),
+    WEATHER_ALERT("WEATHER_ALERT", "Weather Alert"),
+    COMMUNITY("COMMUNITY", "Community");
+
+    companion object {
+        fun fromCode(raw: String?): TourismEventType =
+            entries.firstOrNull { it.code.equals(raw, ignoreCase = true) } ?: COMMUNITY
+    }
+}
+
+enum class TourismEventSeverity(val code: String, val label: String) {
+    INFO("INFO", "Info"),
+    ADVISORY("ADVISORY", "Advisory"),
+    ALERT("ALERT", "Alert");
+
+    companion object {
+        fun fromCode(raw: String?): TourismEventSeverity =
+            entries.firstOrNull { it.code.equals(raw, ignoreCase = true) } ?: INFO
+    }
+}
+
+@Keep
+@IgnoreExtraProperties
+data class TourismEvent(
+    @DocumentId val id: String = "",
+    val userId: String = "",
+    val title: String = "",
+    val summary: String = "",
+    val eventType: String = TourismEventType.FESTIVAL.code,
+    val severity: String = TourismEventSeverity.INFO.code,
+    val dateLabel: String = "",
+    val locationName: String = "",
+    val attractionId: String = "",
+    val active: Boolean = true,
     val visibility: String = "public",
     @com.google.firebase.firestore.ServerTimestamp val createdAt: Timestamp? = null,
     @com.google.firebase.firestore.ServerTimestamp val updatedAt: Timestamp? = null

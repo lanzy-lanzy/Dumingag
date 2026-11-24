@@ -1,0 +1,9 @@
+<?xml version="1.0" encoding="utf-8"?>
+<paths>
+    <cache-path
+        name="postcards"
+        path="postcards/" />
+    <cache-path
+        name="captured_photos"
+        path="captured_photos/" />
+</paths>

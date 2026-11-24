@@ -4,6 +4,9 @@ import android.content.Context
 import com.example.R
 import com.example.model.CommunityReview
 import com.example.model.ItineraryItem
+import com.example.model.TourismEvent
+import com.example.model.TourismEventSeverity
+import com.example.model.TourismEventType
 import com.example.model.TransitMethod
 import com.example.model.TransitModeCategory
 import com.example.model.TransitServiceStatus
@@ -281,7 +284,9 @@ class DumingagCloudRepository(
         attractionName: String,
         rating: Int,
         comment: String,
-        visitTag: String
+        visitTag: String,
+        photoData: String? = null,
+        verifiedVisit: Boolean = false
     ): Result<Unit> {
         val docRef = db.collection("reviews").document()
         return try {
@@ -292,19 +297,28 @@ class DumingagCloudRepository(
             val clampedRating = rating.coerceIn(1, 5).toLong()
             val safeAuthor = authorName.trim().ifBlank { "Traveler" }.take(80)
             val safeTag = visitTag.trim().ifBlank { "Eco-Tour" }.take(40)
+            val cleanPhoto = photoData?.trim()
+            if (cleanPhoto != null) {
+                require(cleanPhoto.length <= 65536) { "Review photo exceeds maximum size limit." }
+            }
 
-            val payload = mapOf(
-                "userId" to uid,
-                "authorName" to safeAuthor,
-                "attractionId" to attractionId.trim().take(80),
-                "attractionName" to attractionName.trim().take(120),
-                "rating" to clampedRating,
-                "comment" to trimmedComment,
-                "visitTag" to safeTag,
-                "visibility" to "public",
-                "createdAt" to FieldValue.serverTimestamp(),
-                "updatedAt" to FieldValue.serverTimestamp()
-            )
+            val payload = buildMap<String, Any> {
+                put("userId", uid)
+                put("authorName", safeAuthor)
+                put("attractionId", attractionId.trim().take(80))
+                put("attractionName", attractionName.trim().take(120))
+                put("rating", clampedRating)
+                put("comment", trimmedComment)
+                put("visitTag", safeTag)
+                if (!cleanPhoto.isNullOrEmpty()) {
+                    put("photoData", cleanPhoto)
+                }
+                put("verifiedVisit", verifiedVisit)
+                put("helpfulUserIds", emptyList<String>())
+                put("visibility", "public")
+                put("createdAt", FieldValue.serverTimestamp())
+                put("updatedAt", FieldValue.serverTimestamp())
+            }
             docRef.set(payload).await()
             Result.success(Unit)
         } catch (e: CancellationException) {
@@ -320,7 +334,9 @@ class DumingagCloudRepository(
         reviewId: String,
         rating: Int,
         comment: String,
-        visitTag: String
+        visitTag: String,
+        photoData: String? = null,
+        clearPhoto: Boolean = false
     ): Result<Unit> {
         val docPath = "reviews/$reviewId"
         return try {
@@ -328,15 +344,82 @@ class DumingagCloudRepository(
             check(uid == userId) { "Signed-in user mismatch" }
             val trimmedComment = comment.trim().take(800)
             require(trimmedComment.length >= 3) { "Review must be at least 3 characters." }
+            val cleanPhoto = photoData?.trim()
+            if (cleanPhoto != null) {
+                require(cleanPhoto.length <= 65536) { "Review photo exceeds maximum size limit." }
+            }
+            val updates = buildMap<String, Any> {
+                put("rating", rating.coerceIn(1, 5).toLong())
+                put("comment", trimmedComment)
+                put("visitTag", visitTag.trim().ifBlank { "Eco-Tour" }.take(40))
+                if (clearPhoto) {
+                    put("photoData", FieldValue.delete())
+                } else if (!cleanPhoto.isNullOrEmpty()) {
+                    put("photoData", cleanPhoto)
+                }
+                put("updatedAt", FieldValue.serverTimestamp())
+            }
+            db.collection("reviews").document(reviewId)
+                .update(updates).await()
+            Result.success(Unit)
+        } catch (e: CancellationException) {
+            throw e
+        } catch (e: Exception) {
+            handleFirestoreError(e, OperationType.UPDATE, docPath)
+            Result.failure(e)
+        }
+    }
+
+    suspend fun toggleReviewHelpful(
+        userId: String,
+        reviewId: String,
+        currentlyHelpful: Boolean
+    ): Result<Boolean> {
+        val docPath = "reviews/$reviewId"
+        return try {
+            val uid = requireUserId()
+            check(uid == userId) { "Signed-in user mismatch" }
+            val op = if (currentlyHelpful) FieldValue.arrayRemove(uid) else FieldValue.arrayUnion(uid)
             db.collection("reviews").document(reviewId)
                 .update(
                     mapOf(
-                        "rating" to rating.coerceIn(1, 5).toLong(),
-                        "comment" to trimmedComment,
-                        "visitTag" to visitTag.trim().ifBlank { "Eco-Tour" }.take(40),
+                        "helpfulUserIds" to op,
                         "updatedAt" to FieldValue.serverTimestamp()
                     )
                 ).await()
+            Result.success(!currentlyHelpful)
+        } catch (e: CancellationException) {
+            throw e
+        } catch (e: Exception) {
+            handleFirestoreError(e, OperationType.UPDATE, docPath)
+            Result.failure(e)
+        }
+    }
+
+    suspend fun postAdminReviewReply(
+        reviewId: String,
+        replyText: String,
+        adminLabel: String = "Official Dumingag Tourism"
+    ): Result<Unit> {
+        val docPath = "reviews/$reviewId"
+        return try {
+            requireUserId()
+            val cleanReply = replyText.trim().take(500)
+            val cleanLabel = adminLabel.trim().ifBlank { "Official Dumingag Tourism" }.take(80)
+            val updates = if (cleanReply.isEmpty()) {
+                mapOf(
+                    "adminReply" to FieldValue.delete(),
+                    "adminReplyBy" to FieldValue.delete(),
+                    "updatedAt" to FieldValue.serverTimestamp()
+                )
+            } else {
+                mapOf(
+                    "adminReply" to cleanReply,
+                    "adminReplyBy" to cleanLabel,
+                    "updatedAt" to FieldValue.serverTimestamp()
+                )
+            }
+            db.collection("reviews").document(reviewId).update(updates).await()
             Result.success(Unit)
         } catch (e: CancellationException) {
             throw e
@@ -877,7 +960,7 @@ class DumingagCloudRepository(
                         descriptionEn = item.description.en,
                         historyNoteEn = item.historyNote.en,
                         barangay = item.barangay,
-                        category = item.category.name,
+                        category = item.categoryCode.ifBlank { item.category.name },
                         latitude = item.latitude,
                         longitude = item.longitude,
                         openHours = item.openHours,
@@ -887,6 +970,7 @@ class DumingagCloudRepository(
                         baseRating = item.baseRating,
                         imageKey = item.imageKey,
                         photoData = item.photoData.ifBlank { null },
+                        galleryPhotos = item.galleryPhotos,
                         clearPhoto = false,
                         includeCreationFields = true
                     )
@@ -921,6 +1005,7 @@ class DumingagCloudRepository(
         baseRating: Double,
         imageKey: String,
         photoData: String?,
+        galleryPhotos: List<String> = emptyList(),
         clearPhoto: Boolean = false
     ): Result<String> {
         val colRef = db.collection("attractions")
@@ -950,6 +1035,7 @@ class DumingagCloudRepository(
                 baseRating = baseRating,
                 imageKey = imageKey,
                 photoData = photoData,
+                galleryPhotos = galleryPhotos,
                 clearPhoto = clearPhoto && exists,
                 includeCreationFields = !exists
             )
@@ -1004,6 +1090,7 @@ class DumingagCloudRepository(
         baseRating: Double,
         imageKey: String,
         photoData: String?,
+        galleryPhotos: List<String>,
         clearPhoto: Boolean,
         includeCreationFields: Boolean
     ): Map<String, Any> {
@@ -1019,8 +1106,13 @@ class DumingagCloudRepository(
         val cleanNode = mapNodeId.trim().ifBlank { "node_poblacion" }.take(80)
         val cleanImageKey = imageKey.trim().ifBlank { "waterfall" }.take(40)
         val cleanPhoto = photoData?.trim()
-        val allowedCategories = setOf("HISTORICAL", "NATURE", "CULTURAL", "LANDMARK", "ORGANIC_FARM")
-        val validCategory = if (category in allowedCategories) category else "NATURE"
+        val cleanGallery = galleryPhotos.map { it.trim() }.filter { it.isNotEmpty() && it.length <= 65536 }.take(4)
+        val normalizedCat = com.example.model.CategoryCatalog.normalizeCode(category)
+        val validCategory = if (com.example.model.CategoryCatalog.isValidCode(normalizedCat)) {
+            normalizedCat
+        } else {
+            "NATURE"
+        }
         val validLat = latitude.coerceIn(-90.0, 90.0)
         val validLon = longitude.coerceIn(-180.0, 180.0)
         val validRating = baseRating.coerceIn(1.0, 5.0)
@@ -1066,6 +1158,166 @@ class DumingagCloudRepository(
             } else if (!cleanPhoto.isNullOrEmpty()) {
                 put("photoData", cleanPhoto)
             }
+            put("galleryPhotos", cleanGallery)
+            put("updatedAt", FieldValue.serverTimestamp())
+        }
+    }
+
+    // --- Admin-Managed Attraction Categories (Synced live across all travelers) ---
+
+    fun observePublicCategories(): Flow<List<com.example.model.ManagedCategory>> = flow {
+        val path = "attraction_categories"
+        db.collection(path)
+            .whereEqualTo("visibility", "public")
+            .snapshots()
+            .map { snapshot ->
+                snapshot.toObjects(
+                    com.example.model.ManagedCategory::class.java,
+                    DocumentSnapshot.ServerTimestampBehavior.ESTIMATE
+                ).sortedWith(compareBy<com.example.model.ManagedCategory> { it.sortOrder }.thenBy { it.name.lowercase(Locale.ROOT) })
+            }
+            .catch { error ->
+                val firestoreError = generateSequence(error) { it.cause }
+                    .filterIsInstance<FirebaseFirestoreException>()
+                    .firstOrNull()
+                if (firestoreError == null && error is CancellationException) throw error
+                val exceptionToLog = firestoreError ?: (error as? Exception)
+                if (exceptionToLog != null && auth.currentUser != null) {
+                    handleFirestoreError(exceptionToLog, OperationType.LIST, path)
+                }
+                throw error
+            }
+            .collect { emit(it) }
+    }
+
+    suspend fun seedDefaultCategoriesIfEmpty(
+        userId: String,
+        defaults: List<com.example.model.ManagedCategory>
+    ): Result<Boolean> {
+        val path = "attraction_categories"
+        return try {
+            val uid = requireUserId()
+            check(uid == userId) { "Signed-in user mismatch" }
+            val existingQuery = db.collection(path)
+                .whereEqualTo("visibility", "public")
+                .limit(1)
+                .get()
+                .await()
+            if (!existingQuery.isEmpty) {
+                return Result.success(false)
+            }
+            for (item in defaults) {
+                val docId = item.effectiveCode.takeIf { com.example.model.CategoryCatalog.isValidCode(it) } ?: continue
+                val docRef = db.collection(path).document(docId)
+                if (!docRef.get().await().exists()) {
+                    val payload = buildCategoryPayload(
+                        uid = uid,
+                        code = docId,
+                        name = item.name,
+                        iconKey = item.iconKey,
+                        sortOrder = item.sortOrder,
+                        includeCreationFields = true
+                    )
+                    docRef.set(payload).await()
+                }
+            }
+            Result.success(true)
+        } catch (e: CancellationException) {
+            throw e
+        } catch (e: Exception) {
+            handleFirestoreError(e, OperationType.WRITE, path)
+            Result.failure(e)
+        }
+    }
+
+    suspend fun upsertCloudCategory(
+        userId: String,
+        categoryId: String?,
+        code: String,
+        name: String,
+        iconKey: String,
+        sortOrder: Long
+    ): Result<String> {
+        val cleanCode = com.example.model.CategoryCatalog.normalizeCode(code.ifBlank { name })
+        val resolvedDocId = categoryId?.trim()?.take(128)?.takeIf { it.isNotBlank() } ?: cleanCode
+        val colRef = db.collection("attraction_categories")
+        val docRef = colRef.document(resolvedDocId.ifBlank { "CUSTOM_SPOT" })
+        return try {
+            val uid = requireUserId()
+            check(uid == userId) { "Signed-in user mismatch" }
+            require(com.example.model.CategoryCatalog.isValidCode(cleanCode)) {
+                "Category name must produce a valid code (at least 2 letters or numbers)."
+            }
+            val exists = docRef.get().await().exists()
+            val payload = buildCategoryPayload(
+                uid = uid,
+                code = cleanCode,
+                name = name,
+                iconKey = iconKey,
+                sortOrder = sortOrder,
+                includeCreationFields = !exists
+            )
+            if (exists) {
+                docRef.update(payload).await()
+            } else {
+                docRef.set(payload).await()
+            }
+            Result.success(docRef.id)
+        } catch (e: CancellationException) {
+            throw e
+        } catch (e: Exception) {
+            handleFirestoreError(e, if (categoryId.isNullOrBlank()) OperationType.CREATE else OperationType.UPDATE, docRef.path)
+            Result.failure(e)
+        }
+    }
+
+    suspend fun deleteCloudCategory(userId: String, categoryId: String): Result<Unit> {
+        val docPath = "attraction_categories/$categoryId"
+        return try {
+            val uid = requireUserId()
+            check(uid == userId) { "Signed-in user mismatch" }
+            require(categoryId.isNotBlank()) { "Category ID cannot be blank" }
+            db.collection("attraction_categories").document(categoryId).delete().await()
+            Result.success(Unit)
+        } catch (e: CancellationException) {
+            throw e
+        } catch (e: Exception) {
+            handleFirestoreError(e, OperationType.DELETE, docPath)
+            Result.failure(e)
+        }
+    }
+
+    private fun buildCategoryPayload(
+        uid: String,
+        code: String,
+        name: String,
+        iconKey: String,
+        sortOrder: Long,
+        includeCreationFields: Boolean
+    ): Map<String, Any> {
+        val cleanCode = com.example.model.CategoryCatalog.normalizeCode(code)
+        val cleanName = name.trim().take(50)
+        val cleanIcon = iconKey.trim().lowercase(Locale.ROOT)
+            .replace(Regex("[^a-z0-9_]+"), "")
+            .take(32)
+            .ifBlank { "forest" }
+        val safeOrder = sortOrder.coerceIn(0L, 999L)
+
+        require(com.example.model.CategoryCatalog.isValidCode(cleanCode)) {
+            "Category code must be 2–40 uppercase letters, digits, or underscores."
+        }
+        require(cleanName.length >= 2) { "Category name must be at least 2 characters." }
+
+        return buildMap {
+            if (includeCreationFields) {
+                put("userId", uid)
+                put("code", cleanCode)
+                put("visibility", "public")
+                put("createdAt", FieldValue.serverTimestamp())
+            }
+            put("name", cleanName)
+            put("iconKey", cleanIcon)
+            put("sortOrder", safeOrder)
             put("updatedAt", FieldValue.serverTimestamp())
         }
     }
@@ -1257,6 +1509,182 @@ class DumingagCloudRepository(
         "HIGH" -> 1
         "MEDICAL" -> 2
         else -> 3
+    }
+
+    // --- Admin-Managed Dumingag Tourism Events & Trail Advisories ---
+
+    fun observePublicTourismEvents(): Flow<List<TourismEvent>> = flow {
+        val path = "tourism_events"
+        db.collection(path)
+            .whereEqualTo("visibility", "public")
+            .snapshots()
+            .map { snapshot ->
+                snapshot.toObjects(TourismEvent::class.java, DocumentSnapshot.ServerTimestampBehavior.ESTIMATE)
+                    .sortedWith(
+                        compareByDescending<TourismEvent> { it.active }
+                            .thenBy { eventSeverityOrder(it.severity) }
+                            .thenByDescending { it.createdAt?.seconds ?: 0L }
+                    )
+            }
+            .catch { error ->
+                val firestoreError = generateSequence(error) { it.cause }
+                    .filterIsInstance<FirebaseFirestoreException>()
+                    .firstOrNull()
+                if (firestoreError == null && error is CancellationException) throw error
+                val exceptionToLog = firestoreError ?: (error as? Exception)
+                if (exceptionToLog != null && auth.currentUser != null) {
+                    handleFirestoreError(exceptionToLog, OperationType.LIST, path)
+                }
+                throw error
+            }
+            .collect { emit(it) }
+    }
+
+    suspend fun seedDefaultTourismEventsIfEmpty(
+        userId: String,
+        defaults: List<TourismEvent>
+    ): Result<Boolean> {
+        val path = "tourism_events"
+        return try {
+            val uid = requireUserId()
+            check(uid == userId) { "Signed-in user mismatch" }
+            val existing = db.collection(path).whereEqualTo("visibility", "public").limit(1).get().await()
+            if (!existing.isEmpty) return Result.success(false)
+            for (event in defaults) {
+                val docId = event.id.trim().take(128).ifBlank { continue }
+                val docRef = db.collection(path).document(docId)
+                if (!docRef.get().await().exists()) {
+                    docRef.set(
+                        buildTourismEventPayload(
+                            uid = uid,
+                            title = event.title,
+                            summary = event.summary,
+                            eventType = event.eventType,
+                            severity = event.severity,
+                            dateLabel = event.dateLabel,
+                            locationName = event.locationName,
+                            attractionId = event.attractionId,
+                            active = event.active,
+                            includeCreationFields = true
+                        )
+                    ).await()
+                }
+            }
+            Result.success(true)
+        } catch (e: CancellationException) {
+            throw e
+        } catch (e: Exception) {
+            handleFirestoreError(e, OperationType.WRITE, path)
+            Result.failure(e)
+        }
+    }
+
+    suspend fun upsertTourismEvent(
+        userId: String,
+        eventId: String?,
+        title: String,
+        summary: String,
+        eventType: String,
+        severity: String,
+        dateLabel: String,
+        locationName: String,
+        attractionId: String,
+        active: Boolean
+    ): Result<String> {
+        val colRef = db.collection("tourism_events")
+        val docRef = if (eventId.isNullOrBlank()) colRef.document() else colRef.document(eventId.trim().take(128))
+        return try {
+            val uid = requireUserId()
+            check(uid == userId) { "Signed-in user mismatch" }
+            val exists = !eventId.isNullOrBlank() && docRef.get().await().exists()
+            val payload = buildTourismEventPayload(
+                uid = uid,
+                title = title,
+                summary = summary,
+                eventType = eventType,
+                severity = severity,
+                dateLabel = dateLabel,
+                locationName = locationName,
+                attractionId = attractionId,
+                active = active,
+                includeCreationFields = !exists
+            )
+            if (exists) {
+                docRef.update(payload).await()
+            } else {
+                docRef.set(payload).await()
+            }
+            Result.success(docRef.id)
+        } catch (e: CancellationException) {
+            throw e
+        } catch (e: Exception) {
+            handleFirestoreError(e, if (eventId.isNullOrBlank()) OperationType.CREATE else OperationType.UPDATE, docRef.path)
+            Result.failure(e)
+        }
+    }
+
+    suspend fun deleteTourismEvent(userId: String, eventId: String): Result<Unit> {
+        val docPath = "tourism_events/$eventId"
+        return try {
+            val uid = requireUserId()
+            check(uid == userId) { "Signed-in user mismatch" }
+            require(eventId.isNotBlank()) { "Event ID cannot be blank" }
+            db.collection("tourism_events").document(eventId).delete().await()
+            Result.success(Unit)
+        } catch (e: CancellationException) {
+            throw e
+        } catch (e: Exception) {
+            handleFirestoreError(e, OperationType.DELETE, docPath)
+            Result.failure(e)
+        }
+    }
+
+    private fun buildTourismEventPayload(
+        uid: String,
+        title: String,
+        summary: String,
+        eventType: String,
+        severity: String,
+        dateLabel: String,
+        locationName: String,
+        attractionId: String,
+        active: Boolean,
+        includeCreationFields: Boolean
+    ): Map<String, Any> {
+        val cleanTitle = title.trim().take(120)
+        val cleanSummary = summary.trim().take(500)
+        val cleanDate = dateLabel.trim().take(80)
+        val cleanLoc = locationName.trim().take(120)
+        val cleanSpotId = attractionId.trim().take(80)
+        require(cleanTitle.length >= 2) { "Event title must be at least 2 characters." }
+        require(cleanSummary.length >= 3) { "Summary must be at least 3 characters." }
+        require(cleanDate.length >= 2) { "Schedule/date label must be at least 2 characters." }
+        require(cleanLoc.length >= 2) { "Location must be at least 2 characters." }
+        val validType = TourismEventType.fromCode(eventType).code
+        val validSeverity = TourismEventSeverity.fromCode(severity).code
+
+        return buildMap {
+            if (includeCreationFields) {
+                put("userId", uid)
+                put("visibility", "public")
+                put("createdAt", FieldValue.serverTimestamp())
+            }
+            put("title", cleanTitle)
+            put("summary", cleanSummary)
+            put("eventType", validType)
+            put("severity", validSeverity)
+            put("dateLabel", cleanDate)
+            put("locationName", cleanLoc)
+            put("attractionId", cleanSpotId)
+            put("active", active)
+            put("updatedAt", FieldValue.serverTimestamp())
+        }
+    }
+
+    private fun eventSeverityOrder(severity: String): Int = when (severity) {
+        TourismEventSeverity.ALERT.code -> 0
+        TourismEventSeverity.ADVISORY.code -> 1
+        else -> 2
     }
 }
 

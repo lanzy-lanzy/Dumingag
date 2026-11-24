@@ -1,8 +1,10 @@
 package com.example.ui.screens
 
 import androidx.annotation.DrawableRes
+import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
+import androidx.compose.foundation.border
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.grid.GridCells
 import androidx.compose.foundation.lazy.grid.GridItemSpan
@@ -14,6 +16,9 @@ import androidx.compose.runtime.Composable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.draw.drawBehind
+import androidx.compose.ui.draw.shadow
+import androidx.compose.ui.geometry.CornerRadius
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.vector.ImageVector
@@ -21,7 +26,17 @@ import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.res.painterResource
+import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
+import com.example.ui.theme.EmeraldPrimary
+import com.example.ui.theme.SplashGlassPanelBottom
+import com.example.ui.theme.SplashGlassPanelTop
+import com.example.ui.theme.SplashGlassSpecularEdge
+import com.example.ui.theme.SplashGlassSpecularMid
+import com.example.ui.theme.SplashGlassSpecularTop
+import com.example.ui.theme.SplashGlassTextPrimary
+import com.example.ui.theme.SplashGlassTextSecondary
+import com.example.ui.theme.SplashGlassThumbTop
 
 @Composable
 internal fun TravelPageGrid(tag: String, content: LazyGridScope.() -> Unit) {
@@ -50,14 +65,58 @@ internal fun TravelPageHeader(
     @DrawableRes photo: Int,
     actions: @Composable () -> Unit
 ) {
-    Box(Modifier.fillMaxWidth().clip(RoundedCornerShape(24.dp))) {
+    val headerShape = RoundedCornerShape(28.dp)
+    Box(
+        Modifier
+            .fillMaxWidth()
+            .shadow(12.dp, headerShape, ambientColor = Color.Black.copy(alpha = 0.24f))
+            .clip(headerShape)
+            .border(
+                width = 1.4.dp,
+                brush = Brush.linearGradient(
+                    colors = listOf(SplashGlassSpecularTop, SplashGlassSpecularMid, SplashGlassSpecularEdge)
+                ),
+                shape = headerShape
+            )
+    ) {
         Image(painterResource(photo), null, Modifier.matchParentSize(), contentScale = ContentScale.Crop)
-        Box(Modifier.matchParentSize().background(Brush.horizontalGradient(
-            listOf(Color(0xF00C3029), Color(0xAF15382D), Color(0x85112D28))
-        )))
+        Box(
+            Modifier
+                .matchParentSize()
+                .background(
+                    Brush.horizontalGradient(
+                        listOf(
+                            SplashGlassPanelBottom.copy(alpha = 0.90f),
+                            SplashGlassPanelTop.copy(alpha = 0.78f),
+                            SplashGlassPanelBottom.copy(alpha = 0.62f)
+                        )
+                    )
+                )
+                .drawBehind {
+                    drawRoundRect(
+                        brush = Brush.verticalGradient(
+                            colors = listOf(SplashGlassSpecularTop.copy(alpha = 0.20f), Color.Transparent),
+                            startY = 0f,
+                            endY = size.height * 0.40f
+                        ),
+                        cornerRadius = CornerRadius(28.dp.toPx(), 28.dp.toPx())
+                    )
+                }
+        )
         Column(Modifier.padding(20.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
-            Text(title, style = MaterialTheme.typography.headlineLarge, color = Color.White)
-            summary?.let { Text(it, style = MaterialTheme.typography.bodyMedium, color = Color.White) }
+            Text(
+                text = title,
+                style = MaterialTheme.typography.headlineLarge,
+                fontWeight = FontWeight.Bold,
+                color = SplashGlassTextPrimary
+            )
+            summary?.let {
+                Text(
+                    text = it,
+                    style = MaterialTheme.typography.bodyMedium,
+                    color = SplashGlassTextSecondary
+                )
+            }
             FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
                 actions()
             }
@@ -70,12 +129,17 @@ internal fun TravelHeaderAction(label: String, icon: ImageVector, tag: String, e
     Button(
         onClick = onClick,
         enabled = enabled,
-        colors = ButtonDefaults.buttonColors(containerColor = Color.White, contentColor = Color(0xFF133E32)),
+        shape = RoundedCornerShape(50),
+        colors = ButtonDefaults.buttonColors(
+            containerColor = SplashGlassThumbTop,
+            contentColor = EmeraldPrimary
+        ),
+        border = BorderStroke(1.1.dp, SplashGlassSpecularTop),
         contentPadding = PaddingValues(horizontal = 16.dp, vertical = 8.dp),
         modifier = Modifier.heightIn(min = 48.dp).testTag(tag)
     ) {
         Icon(icon, null, Modifier.size(18.dp))
         Spacer(Modifier.width(6.dp))
-        Text(label)
+        Text(label, fontWeight = FontWeight.Bold)
     }
 }

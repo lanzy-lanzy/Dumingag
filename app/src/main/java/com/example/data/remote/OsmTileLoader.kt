@@ -97,4 +97,59 @@ class OsmTileLoader(context: Context) {
             }
         }
     }
+
+    suspend fun countCachedDiskTiles(): Int = withContext(Dispatchers.IO) {
+        cacheDir.walkTopDown().count { it.isFile && it.extension == "png" && it.length() > 0L }
+    }
+
+    /**
+     * Pre-downloads real OpenStreetMap tiles covering Dumingag Poblacion, Mt. Timolan,
+     * Danlugan Falls, and organic farm corridors across zoom levels 12..14 so 2D and 3D
+     * maps work smoothly with zero cellular signal.
+     */
+    suspend fun preDownloadDumingagTiles(
+        onProgress: (downloaded: Int, total: Int) -> Unit = { _, _ -> }
+    ): Int = withContext(Dispatchers.IO) {
+        val minLat = 8.115
+        val maxLat = 8.215
+        val minLon = 123.295
+        val maxLon = 123.395
+        val zoomLevels = listOf(12, 13, 14)
+
+        val tileCoords = buildList {
+            for (z in zoomLevels) {
+                val (minX, minY) = OsmProjection.latLonToTileCoord(maxLat, minLon, z)
+                val (maxX, maxY) = OsmProjection.latLonToTileCoord(minLat, maxLon, z)
+                val maxIdx = (1 shl z) - 1
+                val xStart = kotlin.math.floor(minX).toInt().coerceIn(0, maxIdx)
+                val xEnd = kotlin.math.floor(maxX).toInt().coerceIn(0, maxIdx)
+                val yStart = kotlin.math.floor(minY).toInt().coerceIn(0, maxIdx)
+                val yEnd = kotlin.math.floor(maxY).toInt().coerceIn(0, maxIdx)
+                for (tx in xStart..xEnd) {
+                    for (ty in yStart..yEnd) {
+                        add(Triple(z, tx, ty))
+                    }
+                }
+            }
+        }
+
+        val total = tileCoords.size
+        var completed = 0
+        var availableCount = 0
+        onProgress(0, total)
+
+        for ((z, x, y) in tileCoords) {
+            val diskFile = File(cacheDir, "$z/$x/$y.png")
+            if (diskFile.exists() && diskFile.length() > 0L) {
+                availableCount++
+            } else {
+                val loaded = loadTile(z = z, x = x, y = y, allowNetwork = true)
+                if (loaded != null) availableCount++
+            }
+            completed++
+            onProgress(completed, total)
+        }
+        availableCount
+    }
 }
+

@@ -7,7 +7,11 @@ import androidx.compose.material3.Shapes
 import androidx.compose.material3.darkColorScheme
 import androidx.compose.material3.lightColorScheme
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.CompositionLocalProvider
+import androidx.compose.runtime.compositionLocalOf
 import androidx.compose.ui.unit.dp
+
+val LocalIsDarkTheme = compositionLocalOf { false }
 
 private val LightColorScheme = lightColorScheme(
     primary = EmeraldPrimary,
@@ -30,6 +34,7 @@ private val LightColorScheme = lightColorScheme(
     onSurfaceVariant = OnSoftStoneSurfaceVariant,
     outline = OutlineSubtle,
     error = AlertRed,
+    onError = OnAlertRed,
     errorContainer = AlertRedContainer,
     onErrorContainer = OnAlertRedContainer
 )
@@ -54,9 +59,10 @@ private val DarkColorScheme = darkColorScheme(
     surfaceVariant = DarkForestSurfaceVariant,
     onSurfaceVariant = DarkOnForestSurfaceVariant,
     outline = DarkOutlineSubtle,
-    error = AlertRed,
-    errorContainer = AlertRedContainer,
-    onErrorContainer = OnAlertRedContainer
+    error = DarkAlertRed,
+    onError = DarkOnAlertRed,
+    errorContainer = DarkAlertRedContainer,
+    onErrorContainer = DarkOnAlertRedContainer
 )
 
 val AppShapes = Shapes(
@@ -72,10 +78,12 @@ fun DumingagTheme(
     content: @Composable () -> Unit
 ) {
     val colorScheme = if (darkTheme) DarkColorScheme else LightColorScheme
-    MaterialTheme(
-        colorScheme = colorScheme,
-        typography = AppTypography,
-        shapes = AppShapes,
-        content = content
-    )
+    CompositionLocalProvider(LocalIsDarkTheme provides darkTheme) {
+        MaterialTheme(
+            colorScheme = colorScheme,
+            typography = AppTypography,
+            shapes = AppShapes,
+            content = content
+        )
+    }
 }

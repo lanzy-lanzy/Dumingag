@@ -42,7 +42,7 @@
         "descriptionEn": { "type": "string", "description": "Full attraction description" },
         "historyNoteEn": { "type": "string", "description": "Heritage or conservation note" },
         "barangay": { "type": "string", "description": "Barangay location in Dumingag" },
-        "category": { "type": "string", "enum": ["HISTORICAL", "NATURE", "CULTURAL", "LANDMARK", "ORGANIC_FARM"], "description": "Attraction category" },
+        "category": { "type": "string", "description": "Managed attraction category code (uppercase alphanumeric and underscore, e.g. NATURE, ORGANIC_FARM, WATERFALLS)" },
         "latitude": { "type": "number", "description": "GPS latitude" },
         "longitude": { "type": "number", "description": "GPS longitude" },
         "openHours": { "type": "string", "description": "Visiting hours" },
@@ -52,11 +52,28 @@
         "baseRating": { "type": "number", "description": "Rating from 1.0 to 5.0" },
         "imageKey": { "type": "string", "description": "Bundled visual theme key" },
         "photoData": { "type": "string", "description": "Optional compressed base64 JPEG cover image" },
+        "galleryPhotos": { "type": "array", "items": { "type": "string" }, "description": "Optional multi-photo gallery (up to 4 compressed base64 JPEG images)" },
         "visibility": { "type": "string", "enum": ["public"], "description": "Public visibility scope" },
         "createdAt": { "type": "string", "format": "date-time", "description": "Server timestamp on creation" },
         "updatedAt": { "type": "string", "format": "date-time", "description": "Server timestamp on update" }
       },
       "required": ["userId", "mapNodeId", "nameEn", "subtitleEn", "descriptionEn", "barangay", "category", "latitude", "longitude", "openHours", "entryFeeEn", "bestTimeEn", "transitHintEn", "baseRating", "imageKey", "visibility", "createdAt", "updatedAt"]
+    },
+    "AttractionCategoryRecord": {
+      "title": "AttractionCategoryRecord",
+      "description": "Admin-managed attraction category for organizing Dumingag spots across Explore, Map, and Directory.",
+      "type": "object",
+      "properties": {
+        "userId": { "type": "string", "description": "Admin Firebase Auth UID who created the category" },
+        "code": { "type": "string", "description": "Normalized uppercase category code (e.g. NATURE, WATERFALLS, ECO_CAMP)" },
+        "name": { "type": "string", "description": "Display label shown to travelers" },
+        "iconKey": { "type": "string", "description": "Icon identifier for UI chips and badges" },
+        "sortOrder": { "type": "integer", "description": "Display ordering index (0..999)" },
+        "visibility": { "type": "string", "enum": ["public"], "description": "Public visibility scope" },
+        "createdAt": { "type": "string", "format": "date-time", "description": "Server timestamp on creation" },
+        "updatedAt": { "type": "string", "format": "date-time", "description": "Server timestamp on update" }
+      },
+      "required": ["userId", "code", "name", "iconKey", "sortOrder", "visibility", "createdAt", "updatedAt"]
     },
     "EmergencyContactRecord": {
       "title": "EmergencyContactRecord",
@@ -106,11 +123,35 @@
         "rating": { "type": "integer", "description": "Star rating from 1 to 5" },
         "comment": { "type": "string", "description": "Traveler review text" },
         "visitTag": { "type": "string", "description": "Trip type tag such as Solo, Family, Hiker, Eco-Tour" },
+        "photoData": { "type": "string", "description": "Optional compressed base64 JPEG photo attached by the traveler" },
+        "verifiedVisit": { "type": "boolean", "description": "Whether the traveler checked in at this attraction" },
+        "helpfulUserIds": { "type": "array", "items": { "type": "string" }, "description": "List of traveler UIDs who marked this review helpful" },
+        "adminReply": { "type": "string", "description": "Optional Official Dumingag Tourism response posted by an admin" },
+        "adminReplyBy": { "type": "string", "description": "Optional display label of the responding tourism admin" },
         "visibility": { "type": "string", "enum": ["public"], "description": "Review visibility scope" },
         "createdAt": { "type": "string", "format": "date-time", "description": "Server timestamp on creation" },
         "updatedAt": { "type": "string", "format": "date-time", "description": "Server timestamp on update" }
       },
       "required": ["userId", "authorName", "attractionId", "attractionName", "rating", "comment", "visitTag", "visibility", "createdAt", "updatedAt"]
+    },
+    "TourismEventRecord": {
+      "title": "TourismEventRecord",
+      "description": "Admin-managed Dumingag festival, organic market day, or live trail/weather advisory.",
+      "type": "object",
+      "properties": {
+        "userId": { "type": "string", "description": "Admin Firebase Auth UID who created the notice" },
+        "title": { "type": "string", "description": "Event or advisory headline" },
+        "description": { "type": "string", "description": "Details, schedule, or traveler guidance" },
+        "eventType": { "type": "string", "enum": ["FESTIVAL", "MARKET_DAY", "TRAIL_ADVISORY", "WEATHER_ALERT", "COMMUNITY"], "description": "Notice category" },
+        "severity": { "type": "string", "enum": ["INFO", "ADVISORY", "ALERT"], "description": "Visual urgency level" },
+        "locationName": { "type": "string", "description": "Barangay or attraction location" },
+        "dateLabel": { "type": "string", "description": "Human-readable schedule or date window" },
+        "startMillis": { "type": "integer", "description": "Scheduled start epoch timestamp in ms" },
+        "visibility": { "type": "string", "enum": ["public"], "description": "Public visibility scope" },
+        "createdAt": { "type": "string", "format": "date-time", "description": "Server timestamp on creation" },
+        "updatedAt": { "type": "string", "format": "date-time", "description": "Server timestamp on update" }
+      },
+      "required": ["userId", "title", "description", "eventType", "severity", "locationName", "dateLabel", "startMillis", "visibility", "createdAt", "updatedAt"]
     },
     "TransitMethod": {
       "title": "TransitMethod",
@@ -152,6 +193,10 @@
       "schema": { "$ref": "#/entities/AttractionRecord" },
       "description": "Admin-managed local attractions in Dumingag, synced live across all travelers."
     },
+    "/attraction_categories/{categoryId}": {
+      "schema": { "$ref": "#/entities/AttractionCategoryRecord" },
+      "description": "Admin-managed attraction categories synced live across all travelers."
+    },
     "/emergency_contacts/{contactId}": {
       "schema": { "$ref": "#/entities/EmergencyContactRecord" },
       "description": "Admin-managed Dumingag emergency contacts and LGU hotlines."
@@ -163,6 +208,10 @@
     "/transit_methods/{transitId}": {
       "schema": { "$ref": "#/entities/TransitMethod" },
       "description": "Real-time Dumingag transportation methods, fares, schedules, and terminal tips."
+    },
+    "/tourism_events/{eventId}": {
+      "schema": { "$ref": "#/entities/TourismEventRecord" },
+      "description": "Admin-managed Dumingag festivals, market days, and live trail/weather advisories."
     }
   }
 }

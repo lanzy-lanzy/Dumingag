@@ -30,14 +30,17 @@ import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.AttachFile
+import androidx.compose.material.icons.filled.AutoAwesome
 import androidx.compose.material.icons.filled.CalendarMonth
 import androidx.compose.material.icons.filled.CheckCircle
 import androidx.compose.material.icons.filled.CloudDownload
 import androidx.compose.material.icons.filled.CloudOff
 import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.Description
+import androidx.compose.material.icons.filled.Map
 import androidx.compose.material.icons.filled.Notifications
 import androidx.compose.material.icons.filled.NotificationsOff
+import androidx.compose.material.icons.filled.Share
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.Card
@@ -46,6 +49,7 @@ import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.FilledTonalButton
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
+import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.OutlinedTextField
@@ -68,13 +72,20 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.core.content.ContextCompat
 import com.example.data.DumingagSeedData
+import com.example.data.SmartTravelEngines
+import com.example.data.TravelCompanionEngines
 import com.example.localization.AppStrings
 import com.example.model.AppLanguage
 import com.example.model.Attraction
 import com.example.model.ItineraryItem
+import com.example.model.PackingItem
 import com.example.model.SavedDocument
+import com.example.model.TileDownloadProgress
+import com.example.model.TripExpense
 import com.example.model.UiState
 import com.example.notifications.TravelAlertManager
+import com.example.ui.components.liquidGlassBorder
+import com.example.ui.components.liquidGlassCardColors
 import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
@@ -97,13 +108,23 @@ fun ItineraryVaultScreen(
     onDeleteItinerary: (String) -> Unit,
     onSaveCustomDocument: (String, String, String, String?) -> Unit,
     onDeleteCustomDocument: (String) -> Unit,
-    onShowMessage: (String) -> Unit
+    onShowMessage: (String) -> Unit,
+    userLatLon: Pair<Double, Double> = DumingagSeedData.CENTER_LAT to DumingagSeedData.CENTER_LON,
+    packingItems: List<PackingItem> = emptyList(),
+    tripExpenses: List<TripExpense> = emptyList(),
+    tileDownloadProgress: TileDownloadProgress = TileDownloadProgress(),
+    onTogglePackingItem: (String) -> Unit = {},
+    onAddExpense: (String, String, Double) -> Unit = { _, _, _ -> },
+    onDeleteExpense: (String) -> Unit = {},
+    onPreDownloadMapTiles: () -> Unit = {},
+    onOpenAiConcierge: () -> Unit = {}
 ) {
     val context = LocalContext.current
     var showAddItineraryPicker by remember { mutableStateOf(false) }
     var attractionForDialog by remember { mutableStateOf<Attraction?>(null) }
     var showNewDocDialog by remember { mutableStateOf(false) }
     var viewingDocument by remember { mutableStateOf<SavedDocument?>(null) }
+    var useOptimizedOrder by remember { mutableStateOf(false) }
 
     val notificationLauncher = rememberLauncherForActivityResult(
         contract = ActivityResultContracts.RequestPermission()
@@ -139,6 +160,39 @@ fun ItineraryVaultScreen(
         }
     }
 
+    val plannedStops = (itinerariesState as? UiState.Success)?.data.orEmpty()
+    val optimizedResult = remember(plannedStops, userLatLon, attractions) {
+        TravelCompanionEngines.optimizeItineraryOrder(
+            userLatLon = userLatLon,
+            items = plannedStops,
+            attractions = attractions.ifEmpty { DumingagSeedData.attractions }
+        )
+    }
+
+    val shareTripPlan: () -> Unit = {
+        val displayed = if (useOptimizedOrder && plannedStops.size >= 2) {
+            optimizedResult.orderedItems
+        } else {
+            plannedStops
+        }
+        val shareText = SmartTravelEngines.formatShareableItineraryText(
+            itinerary = displayed,
+            attractions = attractions.ifEmpty { DumingagSeedData.attractions },
+            expenses = tripExpenses,
+            packingItems = packingItems
+        )
+        try {
+            val sendIntent = Intent(Intent.ACTION_SEND).apply {
+                type = "text/plain"
+                putExtra(Intent.EXTRA_SUBJECT, "Dumingag Trip Itinerary & Budget")
+                putExtra(Intent.EXTRA_TEXT, shareText)
+            }
+            context.startActivity(Intent.createChooser(sendIntent, "Share Dumingag Trip Plan"))
+        } catch (_: Exception) {
+            onShowMessage("No share app available on device")
+        }
+    }
+
     TravelPageGrid("plan_page") {
         pageSection {
             val stops = (itinerariesState as? UiState.Success)?.data?.size
@@ -150,6 +204,8 @@ fun ItineraryVaultScreen(
                 TravelHeaderAction("Add stop", Icons.Default.Add, "add_itinerary_stop_button") {
                     showAddItineraryPicker = true
                 }
+                TravelHeaderAction("Share plan", Icons.Default.Share, "share_trip_plan_button", onClick = shareTripPlan)
+                TravelHeaderAction("AI Planner", Icons.Default.AutoAwesome, "plan_open_ai_concierge", onClick = onOpenAiConcierge)
             }
         }
         when (itinerariesState) {
@@ -178,7 +234,11 @@ fun ItineraryVaultScreen(
                 val items = itinerariesState.data
                 if (items.isEmpty()) {
                     pageSection {
-                        Card(colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface)) {
+                        Card(
+                            shape = RoundedCornerShape(22.dp),
+                            border = liquidGlassBorder(),
+                            colors = liquidGlassCardColors()
+                        ) {
                             Column(
                                 modifier = Modifier.fillMaxWidth().padding(20.dp),
                                 horizontalAlignment = Alignment.CenterHorizontally
@@ -195,7 +255,17 @@ fun ItineraryVaultScreen(
                         }
                     }
                 } else {
-                    items(items, key = { "stop-${it.id}" }) { stop ->
+                    if (items.size >= 2) {
+                        pageSection {
+                            ItineraryOptimizerCard(
+                                optimizedResult = optimizedResult,
+                                isOptimizedApplied = useOptimizedOrder,
+                                onToggleOptimized = { useOptimizedOrder = !useOptimizedOrder }
+                            )
+                        }
+                    }
+                    val displayedStops = if (useOptimizedOrder) optimizedResult.orderedItems else items
+                    items(displayedStops, key = { "stop-${it.id}" }) { stop ->
                         ItineraryStopCard(
                             item = stop,
                             language = language,
@@ -230,6 +300,23 @@ fun ItineraryVaultScreen(
             }
         }
 
+        if (packingItems.isNotEmpty()) {
+            pageSection {
+                SmartPackingChecklistCard(
+                    items = packingItems,
+                    onToggleItem = onTogglePackingItem
+                )
+            }
+        }
+
+        pageSection {
+            TripBudgetTrackerCard(
+                expenses = tripExpenses,
+                onAddExpense = onAddExpense,
+                onDeleteExpense = onDeleteExpense
+            )
+        }
+
         // Offline Mode & Map Pack Control Card
         pageSection {
             Text(
@@ -238,8 +325,13 @@ fun ItineraryVaultScreen(
             )
             Spacer(modifier = Modifier.height(8.dp))
             Card(
-                shape = RoundedCornerShape(22.dp),
-                colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.65f))
+                shape = RoundedCornerShape(24.dp),
+                border = liquidGlassBorder(),
+                colors = liquidGlassCardColors(
+                    baseColor = MaterialTheme.colorScheme.primaryContainer,
+                    lightAlpha = 0.78f,
+                    darkAlpha = 0.72f
+                )
             ) {
                 Column(modifier = Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
                     Row(
@@ -304,6 +396,47 @@ fun ItineraryVaultScreen(
                             overflow = TextOverflow.Ellipsis
                         )
                     }
+
+                    // Offline OpenStreetMap Tile Pre-Downloader (Zoom 12-14 for 2D & 3D Real Maps)
+                    if (tileDownloadProgress.isRunning) {
+                        val frac = if (tileDownloadProgress.total > 0) {
+                            tileDownloadProgress.downloaded.toFloat() / tileDownloadProgress.total.toFloat()
+                        } else {
+                            0f
+                        }
+                        Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                            Text(
+                                text = "Pre-downloading real OSM map tiles (${tileDownloadProgress.downloaded}/${tileDownloadProgress.total})…",
+                                style = MaterialTheme.typography.labelSmall,
+                                color = MaterialTheme.colorScheme.onPrimaryContainer
+                            )
+                            LinearProgressIndicator(
+                                progress = { frac },
+                                modifier = Modifier.fillMaxWidth()
+                            )
+                        }
+                    } else {
+                        OutlinedButton(
+                            onClick = onPreDownloadMapTiles,
+                            contentPadding = PaddingValues(horizontal = 16.dp, vertical = 12.dp),
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .heightIn(min = 48.dp)
+                                .testTag("predownload_osm_tiles_button")
+                        ) {
+                            Icon(Icons.Default.Map, contentDescription = null, modifier = Modifier.size(18.dp))
+                            Spacer(modifier = Modifier.width(8.dp))
+                            Text(
+                                text = if (tileDownloadProgress.cachedTilesCount > 0) {
+                                    "Pre-Download 2D/3D Map Tiles (${tileDownloadProgress.cachedTilesCount} cached)"
+                                } else {
+                                    "Pre-Download 2D/3D Real Map Tiles"
+                                },
+                                maxLines = 1,
+                                overflow = TextOverflow.Ellipsis
+                            )
+                        }
+                    }
                 }
             }
         }
@@ -357,8 +490,9 @@ fun ItineraryVaultScreen(
 
         items(savedDocuments, key = { "doc-${it.id}" }) { doc ->
             Card(
-                shape = RoundedCornerShape(16.dp),
-                colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
+                shape = RoundedCornerShape(20.dp),
+                border = liquidGlassBorder(),
+                colors = liquidGlassCardColors(),
                 modifier = Modifier
                     .fillMaxWidth()
                     .clickable { viewingDocument = doc }
@@ -556,9 +690,9 @@ private fun ItineraryStopCard(
     val day = remember(locale) { SimpleDateFormat("d", locale) }
     val schedule = remember(locale) { SimpleDateFormat("EEE, MMM d, yyyy · h:mm a", locale) }
     Card(
-        shape = RoundedCornerShape(18.dp),
-        border = androidx.compose.foundation.BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant),
-        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface)
+        shape = RoundedCornerShape(22.dp),
+        border = liquidGlassBorder(),
+        colors = liquidGlassCardColors()
     ) {
         Column(modifier = Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
             Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(12.dp)) {

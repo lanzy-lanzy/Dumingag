@@ -17,13 +17,25 @@ import com.example.data.local.DumingagDatabase
 import com.example.data.local.OfflineItineraryEntity
 import com.example.data.local.SavedAttractionEntity
 import com.example.data.local.SavedDocumentEntity
+import com.example.data.local.TravelCompanionDataStore
+import com.example.data.local.TravelGuideCacheDataStore
+import com.example.data.local.TravelGuideCacheStatus
+import com.example.data.remote.OsmTileLoader
 import com.example.data.remote.WeatherApiService
 import com.example.model.AppLanguage
+import com.example.model.AppThemeMode
 import com.example.model.Attraction
+import com.example.model.CommunityReview
 import com.example.model.DailyForecast
+import com.example.model.EmergencyContact
 import com.example.model.ItineraryItem
 import com.example.model.SavedDocument
+import com.example.model.TourismEvent
+import com.example.model.TrailConditionReport
+import com.example.model.TransitMethod
+import com.example.model.TripExpense
 import com.example.model.WeatherSnapshot
+import com.example.widget.DumingagWidgetProvider
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.channels.awaitClose
 import kotlinx.coroutines.flow.Flow
@@ -39,9 +51,12 @@ class DumingagOfflineRepository(
     private val context: Context,
     private val db: DumingagDatabase = DumingagDatabase.getInstance(context),
     private val weatherApi: WeatherApiService = WeatherApiService.create(),
-    private val attractionRepo: AttractionRepository = AttractionRepository(db.attractionDao())
+    private val attractionRepo: AttractionRepository = AttractionRepository(db.attractionDao()),
+    private val travelGuideCache: TravelGuideCacheDataStore = TravelGuideCacheDataStore.getInstance(context),
+    private val companionStore: TravelCompanionDataStore = TravelCompanionDataStore.getInstance(context)
 ) {
     private val appContext = context.applicationContext
+    private val osmTileLoader by lazy { OsmTileLoader(appContext) }
 
     private object PrefKeys {
         val LANGUAGE = stringPreferencesKey("language_code")
@@ -65,6 +80,24 @@ class DumingagOfflineRepository(
     val offlinePackUpdatedAt: Flow<Long> = appContext.dataStore.data.map { prefs ->
         prefs[PrefKeys.OFFLINE_PACK_UPDATED_AT] ?: 0L
     }
+
+    val cachedTransitMethods: Flow<List<TransitMethod>> = travelGuideCache.cachedTransitMethods
+
+    val cachedEmergencyContacts: Flow<List<EmergencyContact>> = travelGuideCache.cachedEmergencyContacts
+
+    val cachedReviews: Flow<List<CommunityReview>> = travelGuideCache.cachedReviews
+
+    val cachedTourismEvents: Flow<List<TourismEvent>> = travelGuideCache.cachedTourismEvents
+
+    val cachedAttractionGalleries: Flow<Map<String, List<String>>> = travelGuideCache.cachedAttractionGalleries
+
+    val travelGuideCacheStatus: Flow<TravelGuideCacheStatus> = travelGuideCache.cacheStatus
+
+    val themeMode: Flow<AppThemeMode> = companionStore.themeMode
+    val checkedPackingIds: Flow<Set<String>> = companionStore.checkedPackingIds
+    val tripExpenses: Flow<List<TripExpense>> = companionStore.tripExpenses
+    val checkedInAttractionIds: Flow<Set<String>> = companionStore.checkedInAttractionIds
+    val trailReports: Flow<List<TrailConditionReport>> = companionStore.trailReports
 
     val attractions: Flow<List<Attraction>> = attractionRepo.allAttractions
 
@@ -120,6 +153,7 @@ class DumingagOfflineRepository(
             )
         }
         db.offlineItineraryDao().replaceForUser(entities)
+        DumingagWidgetProvider.syncNextItinerary(appContext, items)
     }
 
     suspend fun seedStarterDocumentsIfNeeded() {
@@ -167,7 +201,72 @@ class DumingagOfflineRepository(
         }
     }
 
-    suspend fun downloadFullOfflinePack() {
+    suspend fun seedEssentialGuideCacheIfNeeded() {
+        travelGuideCache.seedEssentialsIfEmpty(
+            defaultTransit = DumingagSeedData.defaultTransitMethods,
+            defaultContacts = DumingagSeedData.emergencyContacts
+        )
+    }
+
+    suspend fun cacheTransitMethods(methods: List<TransitMethod>) {
+        travelGuideCache.saveTransitMethods(methods)
+    }
+
+    suspend fun cacheEmergencyContacts(contacts: List<EmergencyContact>) {
+        travelGuideCache.saveEmergencyContacts(contacts)
+    }
+
+    suspend fun cacheReviews(reviews: List<CommunityReview>) {
+        travelGuideCache.saveReviews(reviews)
+    }
+
+    suspend fun cacheTourismEvents(events: List<TourismEvent>) {
+        travelGuideCache.saveTourismEvents(events)
+    }
+
+    suspend fun cacheAttractionGalleries(galleries: Map<String, List<String>>) {
+        travelGuideCache.saveAttractionGalleries(galleries)
+    }
+
+    suspend fun getCachedTransitMethods(): List<TransitMethod> =
+        travelGuideCache.getCachedTransitSnapshot()
+
+    suspend fun getCachedEmergencyContacts(): List<EmergencyContact> =
+        travelGuideCache.getCachedEmergencyContactsSnapshot()
+
+    suspend fun setThemeMode(mode: AppThemeMode) = companionStore.setThemeMode(mode)
+
+    suspend fun togglePackingItem(itemId: String) = companionStore.togglePackingItem(itemId)
+
+    suspend fun addTripExpense(title: String, category: String, amountPhp: Double, spotName: String = "") =
+        companionStore.addExpense(title, category, amountPhp, spotName)
+
+    suspend fun deleteTripExpense(expenseId: String) = companionStore.deleteExpense(expenseId)
+
+    suspend fun recordAttractionCheckIn(attractionId: String) = companionStore.recordCheckIn(attractionId)
+
+    suspend fun addTrailReport(
+        attractionId: String,
+        conditionTag: String,
+        crowdLevel: String,
+        note: String,
+        reporterName: String
+    ) = companionStore.addTrailReport(attractionId, conditionTag, crowdLevel, note, reporterName)
+
+    suspend fun countCachedMapTiles(): Int = osmTileLoader.countCachedDiskTiles()
+
+    suspend fun preDownloadOfflineMapTiles(
+        onProgress: (downloaded: Int, total: Int) -> Unit
+    ): Int = osmTileLoader.preDownloadDumingagTiles(onProgress)
+
+    fun syncWidgetWeather(snapshot: WeatherSnapshot) {
+        DumingagWidgetProvider.syncWeather(appContext, snapshot)
+    }
+
+    suspend fun downloadFullOfflinePack(
+        latestTransit: List<TransitMethod> = emptyList(),
+        latestEmergencyContacts: List<EmergencyContact> = emptyList()
+    ) {
         val now = System.currentTimeMillis()
         attractionRepo.insertAttractions(DumingagSeedData.attractions, isSavedOffline = true)
         val allEntities = DumingagSeedData.attractions.map {
@@ -175,6 +274,14 @@ class DumingagOfflineRepository(
         }
         db.savedAttractionDao().saveAll(allEntities)
         seedStarterDocumentsIfNeeded()
+        travelGuideCache.saveTransitMethods(
+            methods = latestTransit.ifEmpty { DumingagSeedData.defaultTransitMethods },
+            updatedAtMillis = now
+        )
+        travelGuideCache.saveEmergencyContacts(
+            contacts = latestEmergencyContacts.ifEmpty { DumingagSeedData.emergencyContacts },
+            updatedAtMillis = now
+        )
         appContext.dataStore.edit {
             it[PrefKeys.OFFLINE_PACK_READY] = true
             it[PrefKeys.OFFLINE_PACK_UPDATED_AT] = now

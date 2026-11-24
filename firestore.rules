@@ -56,7 +56,22 @@ service cloud.firestore {
     }
 
     function isValidAttractionCategory(cat) {
-      return cat is string && cat in ['HISTORICAL', 'NATURE', 'CULTURAL', 'LANDMARK', 'ORGANIC_FARM'];
+      return cat is string && cat.size() >= 2 && cat.size() <= 40 && cat.matches('^[A-Z0-9_]+$') && cat != 'ALL';
+    }
+
+    function isValidCategoryIconKey(iconKey) {
+      return iconKey is string && iconKey.size() >= 1 && iconKey.size() <= 32 && iconKey.matches('^[a-z0-9_]+$');
+    }
+
+    function isValidAttractionCategoryRecord(data) {
+      return data.userId is string && data.userId.size() >= 1 && data.userId.size() <= 128 &&
+             isValidAttractionCategory(data.code) &&
+             data.name is string && data.name.size() >= 2 && data.name.size() <= 50 &&
+             isValidCategoryIconKey(data.iconKey) &&
+             data.sortOrder is int && data.sortOrder >= 0 && data.sortOrder <= 999 &&
+             data.visibility is string && data.visibility == 'public' &&
+             data.createdAt is timestamp && data.createdAt <= request.time &&
+             data.updatedAt is timestamp && data.updatedAt <= request.time;
     }
 
     function isValidEmergencyPriority(priority) {
@@ -107,6 +122,7 @@ service cloud.firestore {
              data.baseRating is number && data.baseRating >= 1 && data.baseRating <= 5 &&
              data.imageKey is string && data.imageKey.size() >= 1 && data.imageKey.size() <= 40 &&
              (!('photoData' in data) || (data.photoData is string && data.photoData.size() <= 65536)) &&
+             (!('galleryPhotos' in data) || (data.galleryPhotos is list && data.galleryPhotos.size() <= 4)) &&
              data.visibility is string && data.visibility == 'public' &&
              data.createdAt is timestamp && data.createdAt <= request.time &&
              data.updatedAt is timestamp && data.updatedAt <= request.time;
@@ -148,6 +164,34 @@ service cloud.firestore {
              data.rating is int && data.rating >= 1 && data.rating <= 5 &&
              data.comment is string && data.comment.size() >= 3 && data.comment.size() <= 800 &&
              data.visitTag is string && data.visitTag.size() >= 1 && data.visitTag.size() <= 40 &&
+             (!('photoData' in data) || (data.photoData is string && data.photoData.size() <= 65536)) &&
+             (!('verifiedVisit' in data) || data.verifiedVisit is bool) &&
+             (!('helpfulUserIds' in data) || (data.helpfulUserIds is list && data.helpfulUserIds.size() <= 200)) &&
+             (!('adminReply' in data) || (data.adminReply is string && data.adminReply.size() <= 500)) &&
+             (!('adminReplyBy' in data) || (data.adminReplyBy is string && data.adminReplyBy.size() <= 80)) &&
+             data.visibility is string && data.visibility == 'public' &&
+             data.createdAt is timestamp && data.createdAt <= request.time &&
+             data.updatedAt is timestamp && data.updatedAt <= request.time;
+    }
+
+    function isValidTourismEventType(eventType) {
+      return eventType is string && eventType in ['FESTIVAL', 'MARKET_DAY', 'TRAIL_ADVISORY', 'WEATHER_ALERT', 'COMMUNITY'];
+    }
+
+    function isValidTourismEventSeverity(severity) {
+      return severity is string && severity in ['INFO', 'ADVISORY', 'ALERT'];
+    }
+
+    function isValidTourismEvent(data) {
+      return data.userId is string && data.userId.size() >= 1 && data.userId.size() <= 128 &&
+             data.title is string && data.title.size() >= 2 && data.title.size() <= 120 &&
+             data.summary is string && data.summary.size() >= 3 && data.summary.size() <= 500 &&
+             isValidTourismEventType(data.eventType) &&
+             isValidTourismEventSeverity(data.severity) &&
+             data.dateLabel is string && data.dateLabel.size() >= 2 && data.dateLabel.size() <= 80 &&
+             data.locationName is string && data.locationName.size() >= 2 && data.locationName.size() <= 120 &&
+             (!('attractionId' in data) || (data.attractionId is string && data.attractionId.size() <= 80)) &&
+             data.active is bool &&
              data.visibility is string && data.visibility == 'public' &&
              data.createdAt is timestamp && data.createdAt <= request.time &&
              data.updatedAt is timestamp && data.updatedAt <= request.time;
@@ -229,7 +273,7 @@ service cloud.firestore {
                        isValidId(attractionId) &&
                        incoming().userId == request.auth.uid &&
                        incoming().keys().hasAll(['userId', 'mapNodeId', 'nameEn', 'subtitleEn', 'descriptionEn', 'barangay', 'category', 'latitude', 'longitude', 'openHours', 'entryFeeEn', 'bestTimeEn', 'transitHintEn', 'baseRating', 'imageKey', 'visibility', 'createdAt', 'updatedAt']) &&
-                       incoming().keys().hasOnly(['userId', 'mapNodeId', 'nameEn', 'nameCeb', 'nameTl', 'nameEs', 'subtitleEn', 'descriptionEn', 'historyNoteEn', 'barangay', 'category', 'latitude', 'longitude', 'openHours', 'entryFeeEn', 'bestTimeEn', 'transitHintEn', 'baseRating', 'imageKey', 'photoData', 'visibility', 'createdAt', 'updatedAt']) &&
+                       incoming().keys().hasOnly(['userId', 'mapNodeId', 'nameEn', 'nameCeb', 'nameTl', 'nameEs', 'subtitleEn', 'descriptionEn', 'historyNoteEn', 'barangay', 'category', 'latitude', 'longitude', 'openHours', 'entryFeeEn', 'bestTimeEn', 'transitHintEn', 'baseRating', 'imageKey', 'photoData', 'galleryPhotos', 'visibility', 'createdAt', 'updatedAt']) &&
                        isValidAttraction(incoming());
 
       allow update: if isAdmin() &&
@@ -238,9 +282,32 @@ service cloud.firestore {
                        incoming().userId == existing().userId &&
                        incoming().visibility == existing().visibility &&
                        incoming().createdAt == existing().createdAt &&
-                       incoming().diff(existing()).affectedKeys().hasOnly(['mapNodeId', 'nameEn', 'nameCeb', 'nameTl', 'nameEs', 'subtitleEn', 'descriptionEn', 'historyNoteEn', 'barangay', 'category', 'latitude', 'longitude', 'openHours', 'entryFeeEn', 'bestTimeEn', 'transitHintEn', 'baseRating', 'imageKey', 'photoData', 'updatedAt']);
+                       incoming().diff(existing()).affectedKeys().hasOnly(['mapNodeId', 'nameEn', 'nameCeb', 'nameTl', 'nameEs', 'subtitleEn', 'descriptionEn', 'historyNoteEn', 'barangay', 'category', 'latitude', 'longitude', 'openHours', 'entryFeeEn', 'bestTimeEn', 'transitHintEn', 'baseRating', 'imageKey', 'photoData', 'galleryPhotos', 'updatedAt']);
 
       allow delete: if isAdmin() && isValidId(attractionId);
+    }
+
+    match /attraction_categories/{categoryId} {
+      allow get: if isSignedIn() && (existing().visibility == 'public' || isAdmin());
+      allow list: if isSignedIn() && resource.data.visibility == 'public';
+
+      allow create: if isAdmin() &&
+                       isValidId(categoryId) &&
+                       incoming().userId == request.auth.uid &&
+                       incoming().keys().hasAll(['userId', 'code', 'name', 'iconKey', 'sortOrder', 'visibility', 'createdAt', 'updatedAt']) &&
+                       incoming().keys().hasOnly(['userId', 'code', 'name', 'iconKey', 'sortOrder', 'visibility', 'createdAt', 'updatedAt']) &&
+                       isValidAttractionCategoryRecord(incoming());
+
+      allow update: if isAdmin() &&
+                       isValidId(categoryId) &&
+                       isValidAttractionCategoryRecord(incoming()) &&
+                       incoming().userId == existing().userId &&
+                       incoming().code == existing().code &&
+                       incoming().visibility == existing().visibility &&
+                       incoming().createdAt == existing().createdAt &&
+                       incoming().diff(existing()).affectedKeys().hasOnly(['name', 'iconKey', 'sortOrder', 'updatedAt']);
+
+      allow delete: if isAdmin() && isValidId(categoryId);
     }
 
     match /emergency_contacts/{contactId} {
@@ -266,27 +333,64 @@ service cloud.firestore {
     }
 
     match /reviews/{reviewId} {
-      allow get: if isSignedIn() && (existing().visibility == 'public' || existing().userId == request.auth.uid);
+      allow get: if isSignedIn() && (existing().visibility == 'public' || existing().userId == request.auth.uid || isAdmin());
       allow list: if isSignedIn() && (resource.data.visibility == 'public' || resource.data.userId == request.auth.uid);
 
       allow create: if isSignedIn() &&
                        isValidId(reviewId) &&
                        incoming().keys().hasAll(['userId', 'authorName', 'attractionId', 'attractionName', 'rating', 'comment', 'visitTag', 'visibility', 'createdAt', 'updatedAt']) &&
-                       incoming().keys().hasOnly(['userId', 'authorName', 'attractionId', 'attractionName', 'rating', 'comment', 'visitTag', 'visibility', 'createdAt', 'updatedAt']) &&
+                       incoming().keys().hasOnly(['userId', 'authorName', 'attractionId', 'attractionName', 'rating', 'comment', 'visitTag', 'photoData', 'verifiedVisit', 'helpfulUserIds', 'visibility', 'createdAt', 'updatedAt']) &&
+                       (!('helpfulUserIds' in incoming()) || incoming().helpfulUserIds.size() == 0) &&
                        isValidReview(incoming());
 
-      allow update: if isSignedIn() &&
-                       isValidId(reviewId) &&
-                       existing().userId == request.auth.uid &&
-                       isValidReview(incoming()) &&
+      allow update: if isSignedIn() && isValidId(reviewId) && (
+        (
+          existing().userId == request.auth.uid &&
+          isValidReview(incoming()) &&
+          incoming().userId == existing().userId &&
+          incoming().attractionId == existing().attractionId &&
+          incoming().attractionName == existing().attractionName &&
+          incoming().visibility == existing().visibility &&
+          incoming().createdAt == existing().createdAt &&
+          incoming().diff(existing()).affectedKeys().hasOnly(['rating', 'comment', 'visitTag', 'photoData', 'updatedAt'])
+        ) || (
+          incoming().diff(existing()).affectedKeys().hasOnly(['helpfulUserIds', 'updatedAt']) &&
+          incoming().updatedAt is timestamp && incoming().updatedAt <= request.time &&
+          incoming().helpfulUserIds is list && incoming().helpfulUserIds.size() <= 200 &&
+          incoming().helpfulUserIds.toSet().difference(existing().get('helpfulUserIds', []).toSet()).hasOnly([request.auth.uid]) &&
+          existing().get('helpfulUserIds', []).toSet().difference(incoming().helpfulUserIds.toSet()).hasOnly([request.auth.uid])
+        ) || (
+          isAdmin() &&
+          incoming().diff(existing()).affectedKeys().hasOnly(['adminReply', 'adminReplyBy', 'updatedAt']) &&
+          incoming().updatedAt is timestamp && incoming().updatedAt <= request.time &&
+          (!('adminReply' in incoming()) || (incoming().adminReply is string && incoming().adminReply.size() <= 500)) &&
+          (!('adminReplyBy' in incoming()) || (incoming().adminReplyBy is string && incoming().adminReplyBy.size() <= 80))
+        )
+      );
+
+      allow delete: if isSignedIn() && isValidId(reviewId) && (existing().userId == request.auth.uid || isAdmin());
+    }
+
+    match /tourism_events/{eventId} {
+      allow get: if isSignedIn() && (existing().visibility == 'public' || isAdmin());
+      allow list: if isSignedIn() && resource.data.visibility == 'public';
+
+      allow create: if isAdmin() &&
+                       isValidId(eventId) &&
+                       incoming().userId == request.auth.uid &&
+                       incoming().keys().hasAll(['userId', 'title', 'summary', 'eventType', 'severity', 'dateLabel', 'locationName', 'active', 'visibility', 'createdAt', 'updatedAt']) &&
+                       incoming().keys().hasOnly(['userId', 'title', 'summary', 'eventType', 'severity', 'dateLabel', 'locationName', 'attractionId', 'active', 'visibility', 'createdAt', 'updatedAt']) &&
+                       isValidTourismEvent(incoming());
+
+      allow update: if isAdmin() &&
+                       isValidId(eventId) &&
+                       isValidTourismEvent(incoming()) &&
                        incoming().userId == existing().userId &&
-                       incoming().attractionId == existing().attractionId &&
-                       incoming().attractionName == existing().attractionName &&
                        incoming().visibility == existing().visibility &&
                        incoming().createdAt == existing().createdAt &&
-                       incoming().diff(existing()).affectedKeys().hasOnly(['rating', 'comment', 'visitTag', 'updatedAt']);
+                       incoming().diff(existing()).affectedKeys().hasOnly(['title', 'summary', 'eventType', 'severity', 'dateLabel', 'locationName', 'attractionId', 'active', 'updatedAt']);
 
-      allow delete: if isSignedIn() && isValidId(reviewId) && existing().userId == request.auth.uid;
+      allow delete: if isAdmin() && isValidId(eventId);
     }
 
     match /transit_methods/{transitId} {

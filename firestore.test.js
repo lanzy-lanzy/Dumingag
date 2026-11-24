@@ -514,10 +514,23 @@ test("Admin attractions: verified admin CRUD works, unverified spoof & regular u
       latitude: 120.0,
     })
   );
+  // Custom managed category code succeeds; malformed category code fails
+  await assertSucceeds(
+    adminDb.collection("attractions").doc("custom_cat_spot").set({
+      ...validAttraction(ADMIN_UID),
+      category: "WATERFALLS",
+    })
+  );
   await assertFails(
     adminDb.collection("attractions").doc("bad_cat").set({
       ...validAttraction(ADMIN_UID),
-      category: "SPACE_PORT",
+      category: "bad category!",
+    })
+  );
+  await assertFails(
+    adminDb.collection("attractions").doc("all_cat").set({
+      ...validAttraction(ADMIN_UID),
+      category: "ALL",
     })
   );
   await assertFails(
@@ -829,5 +842,275 @@ test("Manual role='admin' via verified email on users/{uid} or admin_emails/{ema
   });
   await assertSucceeds(verifiedBobDb.collection("users").get());
 });
+
+test("Admin attraction categories: public filtered list works, verified admin CRUD works, non-admin/unauth/invalid payloads fail", async () => {
+  await setAdminEmail(ADMIN_EMAIL);
+  const unauthDb = testEnv.unauthenticatedContext().firestore();
+  const aliceDb = testEnv.authenticatedContext(ALICE_UID, {
+    email: "alice@example.com",
+    email_verified: true,
+  }).firestore();
+  const adminDb = testEnv.authenticatedContext(ADMIN_UID, {
+    email: ADMIN_EMAIL,
+    email_verified: true,
+  }).firestore();
+  const now = new Date(Date.now() - 5000);
+
+  const validCategory = (ownerUid) => ({
+    userId: ownerUid,
+    code: "WATERFALLS",
+    name: "Waterfalls & Springs",
+    iconKey: "water",
+    sortOrder: 5,
+    visibility: "public",
+    createdAt: now,
+    updatedAt: now,
+  });
+
+  // Unauthenticated and regular users cannot create or read unfiltered
+  await assertFails(
+    unauthDb.collection("attraction_categories").where("visibility", "==", "public").get()
+  );
+  await assertFails(
+    aliceDb.collection("attraction_categories").doc("WATERFALLS").set(validCategory(ALICE_UID))
+  );
+
+  // Verified admin creates category
+  await assertSucceeds(
+    adminDb.collection("attraction_categories").doc("WATERFALLS").set(validCategory(ADMIN_UID))
+  );
+
+  // Signed-in traveler reads filtered public list; unfiltered list denied
+  await assertSucceeds(
+    aliceDb.collection("attraction_categories").where("visibility", "==", "public").get()
+  );
+  await assertFails(aliceDb.collection("attraction_categories").get());
+
+  // Verified admin updates name/icon/sortOrder; immutable code change rejected
+  await assertSucceeds(
+    adminDb.collection("attraction_categories").doc("WATERFALLS").update({
+      name: "Highland Waterfalls",
+      iconKey: "forest",
+      sortOrder: 2,
+      updatedAt: new Date(Date.now() - 1000),
+    })
+  );
+  await assertFails(
+    adminDb.collection("attraction_categories").doc("WATERFALLS").update({
+      code: "NEW_CODE",
+      updatedAt: new Date(Date.now() - 1000),
+    })
+  );
+
+  // Regular user cannot update or delete; invalid code 'ALL' or lowercase code rejected
+  await assertFails(
+    aliceDb.collection("attraction_categories").doc("WATERFALLS").update({
+      name: "Hijacked",
+      updatedAt: new Date(Date.now() - 1000),
+    })
+  );
+  await assertFails(aliceDb.collection("attraction_categories").doc("WATERFALLS").delete());
+  await assertFails(
+    adminDb.collection("attraction_categories").doc("bad_code").set({
+      ...validCategory(ADMIN_UID),
+      code: "lowercase_bad",
+    })
+  );
+  await assertFails(
+    adminDb.collection("attraction_categories").doc("all_reserved").set({
+      ...validCategory(ADMIN_UID),
+      code: "ALL",
+    })
+  );
+
+  // Verified admin delete succeeds
+  await assertSucceeds(adminDb.collection("attraction_categories").doc("WATERFALLS").delete());
+});
+
+test("Enhanced reviews: photoData, verifiedVisit, helpful upvotes, official admin reply & moderation", async () => {
+  await setAdminEmail(ADMIN_EMAIL);
+  const aliceDb = testEnv.authenticatedContext(ALICE_UID, {
+    email: "alice@example.com",
+    email_verified: true,
+  }).firestore();
+  const bobDb = testEnv.authenticatedContext(BOB_UID, {
+    email: "bob@example.com",
+    email_verified: true,
+  }).firestore();
+  const adminDb = testEnv.authenticatedContext(ADMIN_UID, {
+    email: ADMIN_EMAIL,
+    email_verified: true,
+  }).firestore();
+  const now = new Date(Date.now() - 5000);
+
+  // Regular traveler cannot forge adminReply on create
+  await assertFails(
+    aliceDb.collection("reviews").doc("rev_forged_reply").set({
+      userId: ALICE_UID,
+      authorName: "Alice",
+      attractionId: "danlugan_falls",
+      attractionName: "Danlugan Highland Falls",
+      rating: 5,
+      comment: "Trying to inject official reply",
+      visitTag: "Nature",
+      adminReply: "Forged official response",
+      visibility: "public",
+      createdAt: now,
+      updatedAt: now,
+    })
+  );
+
+  // Traveler creates photo review with verifiedVisit
+  await assertSucceeds(
+    aliceDb.collection("reviews").doc("rev_photo_1").set({
+      userId: ALICE_UID,
+      authorName: "Alice",
+      attractionId: "danlugan_falls",
+      attractionName: "Danlugan Highland Falls",
+      rating: 5,
+      comment: "Crystal clear water after the morning hike!",
+      visitTag: "Nature",
+      photoData: "aGVsbG8tcGhvdG8=",
+      verifiedVisit: true,
+      helpfulUserIds: [],
+      visibility: "public",
+      createdAt: now,
+      updatedAt: now,
+    })
+  );
+
+  // Bob can toggle his OWN UID into helpfulUserIds
+  await assertSucceeds(
+    bobDb.collection("reviews").doc("rev_photo_1").update({
+      helpfulUserIds: [BOB_UID],
+      updatedAt: new Date(Date.now() - 1000),
+    })
+  );
+
+  // Bob CANNOT spoof Alice's UID or remove someone else's UID
+  await assertFails(
+    bobDb.collection("reviews").doc("rev_photo_1").update({
+      helpfulUserIds: [BOB_UID, ALICE_UID],
+      updatedAt: new Date(Date.now() - 1000),
+    })
+  );
+
+  // Bob can remove his own UID
+  await assertSucceeds(
+    bobDb.collection("reviews").doc("rev_photo_1").update({
+      helpfulUserIds: [],
+      updatedAt: new Date(Date.now() - 1000),
+    })
+  );
+
+  // Regular user cannot post adminReply
+  await assertFails(
+    bobDb.collection("reviews").doc("rev_photo_1").update({
+      adminReply: "Fake official reply",
+      adminReplyBy: "Bob",
+      updatedAt: new Date(Date.now() - 1000),
+    })
+  );
+
+  // Verified admin posts official reply
+  await assertSucceeds(
+    adminDb.collection("reviews").doc("rev_photo_1").update({
+      adminReply: "Thank you for visiting Danlugan Falls! Trail railings were newly maintained.",
+      adminReplyBy: "Dumingag Tourism Office",
+      updatedAt: new Date(Date.now() - 1000),
+    })
+  );
+
+  // Verified admin can moderate/delete a traveler review; non-owner Bob still cannot
+  await assertFails(bobDb.collection("reviews").doc("rev_photo_1").delete());
+  await assertSucceeds(adminDb.collection("reviews").doc("rev_photo_1").delete());
+});
+
+test("Attraction multi-photo galleryPhotos limit & Tourism Events CRUD/RBAC", async () => {
+  await setAdminEmail(ADMIN_EMAIL);
+  const unauthDb = testEnv.unauthenticatedContext().firestore();
+  const aliceDb = testEnv.authenticatedContext(ALICE_UID, {
+    email: "alice@example.com",
+    email_verified: true,
+  }).firestore();
+  const adminDb = testEnv.authenticatedContext(ADMIN_UID, {
+    email: ADMIN_EMAIL,
+    email_verified: true,
+  }).firestore();
+  const now = new Date(Date.now() - 5000);
+
+  const baseSpot = {
+    userId: ADMIN_UID,
+    mapNodeId: "node_poblacion",
+    nameEn: "Timolan View Deck",
+    subtitleEn: "Panoramic ridge view",
+    descriptionEn: "Highland sunrise deck overlooking Dumingag valley.",
+    barangay: "Timolan",
+    category: "NATURE",
+    latitude: 8.19,
+    longitude: 123.33,
+    openHours: "05:00 AM - 06:00 PM",
+    entryFeeEn: "PHP 20",
+    bestTimeEn: "Sunrise",
+    transitHintEn: "Habal-habal from Poblacion",
+    baseRating: 4.9,
+    imageKey: "highland",
+    visibility: "public",
+    createdAt: now,
+    updatedAt: now,
+  };
+  await assertSucceeds(
+    adminDb.collection("attractions").doc("timolan_deck").set({
+      ...baseSpot,
+      galleryPhotos: ["p1", "p2", "p3", "p4"],
+    })
+  );
+  await assertFails(
+    adminDb.collection("attractions").doc("timolan_deck_too_many").set({
+      ...baseSpot,
+      galleryPhotos: ["p1", "p2", "p3", "p4", "p5"],
+    })
+  );
+
+  const validEvent = (ownerUid) => ({
+    userId: ownerUid,
+    title: "Dumingag Organic Harvest Festival",
+    summary: "Heirloom rice showcase, farm-to-table tasting, and cultural dances at Poblacion Plaza.",
+    eventType: "FESTIVAL",
+    severity: "INFO",
+    dateLabel: "Every 1st Saturday · 07:00 AM",
+    locationName: "Dumingag Public Plaza",
+    attractionId: "organic_village",
+    active: true,
+    visibility: "public",
+    createdAt: now,
+    updatedAt: now,
+  });
+
+  await assertFails(
+    unauthDb.collection("tourism_events").where("visibility", "==", "public").get()
+  );
+  await assertFails(
+    aliceDb.collection("tourism_events").doc("evt_1").set(validEvent(ALICE_UID))
+  );
+  await assertSucceeds(
+    adminDb.collection("tourism_events").doc("evt_1").set(validEvent(ADMIN_UID))
+  );
+  await assertSucceeds(
+    aliceDb.collection("tourism_events").where("visibility", "==", "public").get()
+  );
+  await assertFails(aliceDb.collection("tourism_events").get());
+
+  await assertSucceeds(
+    adminDb.collection("tourism_events").doc("evt_1").update({
+      severity: "ADVISORY",
+      active: false,
+      updatedAt: new Date(Date.now() - 1000),
+    })
+  );
+  await assertFails(aliceDb.collection("tourism_events").doc("evt_1").delete());
+  await assertSucceeds(adminDb.collection("tourism_events").doc("evt_1").delete());
+});
+
 
 

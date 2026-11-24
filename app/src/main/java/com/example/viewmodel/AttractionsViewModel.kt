@@ -32,15 +32,18 @@ class AttractionsViewModel(
     private val _selectedCategory = MutableStateFlow(AttractionCategory.ALL)
     val selectedCategory: StateFlow<AttractionCategory> = _selectedCategory.asStateFlow()
 
+    private val _selectedCategoryCode = MutableStateFlow("ALL")
+    val selectedCategoryCode: StateFlow<String> = _selectedCategoryCode.asStateFlow()
+
     val savedAttractionIds: StateFlow<Set<String>> = offlineRepository.savedAttractionIds
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000L), emptySet())
 
     val uiState: StateFlow<UiState<List<Attraction>>> = combine(
         _searchQuery,
-        _selectedCategory
-    ) { query, category -> query.trim() to category }
-        .flatMapLatest { (query, category) ->
-            attractionRepository.observeFilteredAttractions(query, category)
+        _selectedCategoryCode
+    ) { query, categoryCode -> query.trim() to categoryCode }
+        .flatMapLatest { (query, categoryCode) ->
+            attractionRepository.observeFilteredAttractionsByCode(query, categoryCode)
                 .map { list -> UiState.Success(list) as UiState<List<Attraction>> }
         }
         .catch { error ->
@@ -69,6 +72,18 @@ class AttractionsViewModel(
 
     fun setCategory(category: AttractionCategory) {
         _selectedCategory.value = category
+        _selectedCategoryCode.value = category.name
+    }
+
+    fun setCategoryCode(code: String) {
+        val normalized = code.trim().uppercase().ifBlank { "ALL" }
+        _selectedCategoryCode.value = normalized
+        _selectedCategory.value = if (normalized == "ALL") {
+            AttractionCategory.ALL
+        } else {
+            enumValues<AttractionCategory>().firstOrNull { it.name == normalized }
+                ?: AttractionCategory.ALL
+        }
     }
 
     fun toggleSavedOffline(attraction: Attraction) {

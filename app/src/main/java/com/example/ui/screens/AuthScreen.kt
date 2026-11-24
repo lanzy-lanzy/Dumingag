@@ -3,17 +3,26 @@ package com.example.ui.screens
 import android.os.Build
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.animateColorAsState
+import androidx.compose.animation.core.FastOutSlowInEasing
+import androidx.compose.animation.core.LinearEasing
+import androidx.compose.animation.core.RepeatMode
+import androidx.compose.animation.core.Spring
+import androidx.compose.animation.core.animateFloat
+import androidx.compose.animation.core.animateFloatAsState
+import androidx.compose.animation.core.infiniteRepeatable
+import androidx.compose.animation.core.rememberInfiniteTransition
+import androidx.compose.animation.core.spring
 import androidx.compose.animation.core.tween
 import androidx.compose.animation.expandVertically
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
 import androidx.compose.animation.shrinkVertically
 import androidx.compose.foundation.BorderStroke
+import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
-import androidx.compose.foundation.isSystemInDarkTheme
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -21,6 +30,7 @@ import androidx.compose.foundation.layout.ColumnScope
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.displayCutoutPadding
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
@@ -33,6 +43,7 @@ import androidx.compose.foundation.layout.statusBarsPadding
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.foundation.verticalScroll
@@ -77,10 +88,14 @@ import androidx.compose.ui.draw.BlurredEdgeTreatment
 import androidx.compose.ui.draw.blur
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.drawBehind
+import androidx.compose.ui.draw.scale
 import androidx.compose.ui.draw.shadow
+import androidx.compose.ui.geometry.CornerRadius
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.StrokeCap
+import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
@@ -94,23 +109,36 @@ import androidx.compose.ui.text.input.VisualTransformation
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.sp
 import androidx.credentials.CredentialManager
 import com.example.R
 import com.example.auth.GoogleAuthHelper
 import com.example.ui.components.GoogleBrandIcon
-import com.example.ui.theme.GlassBackdropBottom
-import com.example.ui.theme.GlassBackdropDeepTop
-import com.example.ui.theme.GlassBackdropMid
-import com.example.ui.theme.GlassDarkBorderMid
-import com.example.ui.theme.GlassDarkBorderTail
-import com.example.ui.theme.GlassDarkHighlight
-import com.example.ui.theme.GlassHeroScrimBottom
-import com.example.ui.theme.GlassHeroScrimTop
-import com.example.ui.theme.GlassLightBorderMid
-import com.example.ui.theme.GlassLightBorderTail
-import com.example.ui.theme.GlassLightHighlight
+import com.example.ui.theme.EmeraldPrimary
+import com.example.ui.theme.SplashGlassMintAccent
+import com.example.ui.theme.SplashGlassPanelBottom
+import com.example.ui.theme.SplashGlassPanelTop
+import com.example.ui.theme.SplashGlassPillActiveBottom
+import com.example.ui.theme.SplashGlassPillActiveTop
+import com.example.ui.theme.SplashGlassPillIdle
+import com.example.ui.theme.SplashGlassSpecularEdge
+import com.example.ui.theme.SplashGlassSpecularMid
+import com.example.ui.theme.SplashGlassSpecularTop
+import com.example.ui.theme.SplashGlassTealAccent
+import com.example.ui.theme.SplashGlassTextPrimary
+import com.example.ui.theme.SplashGlassTextSecondary
+import com.example.ui.theme.SplashGlassThumbBottom
+import com.example.ui.theme.SplashGlassThumbTop
+import com.example.ui.theme.SplashGlassTrackBg
+import com.example.ui.theme.SplashGlassWarmAccent
+import com.example.ui.theme.SplashScrimBottom
+import com.example.ui.theme.SplashScrimCenter
+import com.example.ui.theme.SplashScrimTop
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.launch
+import kotlin.math.PI
+import kotlin.math.cos
+import kotlin.math.sin
 
 @Composable
 fun AuthScreen(
@@ -141,140 +169,253 @@ fun AuthScreen(
     val activeVerificationEmail = pendingVerificationEmail?.takeIf { it.isNotBlank() }
         ?: localPendingVerificationEmail
 
-    val ambientPrimary = MaterialTheme.colorScheme.primary
-    val ambientTertiary = MaterialTheme.colorScheme.tertiary
-    val ambientSecondary = MaterialTheme.colorScheme.secondary
+    val infiniteTransition = rememberInfiniteTransition(label = "auth_liquid_glass")
+    val causticPhase by infiniteTransition.animateFloat(
+        initialValue = 0f,
+        targetValue = (2.0 * PI).toFloat(),
+        animationSpec = infiniteRepeatable(
+            animation = tween(durationMillis = 10000, easing = LinearEasing),
+            repeatMode = RepeatMode.Restart
+        ),
+        label = "auth_caustic_phase"
+    )
+    val backdropScale by infiniteTransition.animateFloat(
+        initialValue = 1.04f,
+        targetValue = 1.10f,
+        animationSpec = infiniteRepeatable(
+            animation = tween(durationMillis = 14000, easing = FastOutSlowInEasing),
+            repeatMode = RepeatMode.Reverse
+        ),
+        label = "auth_backdrop_scale"
+    )
+    val crestOrbitAngle by infiniteTransition.animateFloat(
+        initialValue = 0f,
+        targetValue = 360f,
+        animationSpec = infiniteRepeatable(
+            animation = tween(durationMillis = 6400, easing = LinearEasing),
+            repeatMode = RepeatMode.Restart
+        ),
+        label = "auth_crest_orbit"
+    )
 
     Box(
         modifier = Modifier
             .fillMaxSize()
-            .background(MaterialTheme.colorScheme.background)
+            .background(SplashScrimBottom)
     ) {
-        // Full-bleed blurred highland backdrop so frosted liquid-glass surfaces catch luminous depth
+        // Full-bleed blurred highland photography so translucent iOS liquid glass refracts living depth
         Image(
             painter = painterResource(id = R.drawable.img_dumingag_hero),
             contentDescription = null,
             contentScale = ContentScale.Crop,
             modifier = Modifier
                 .fillMaxSize()
+                .scale(backdropScale)
                 .then(
                     if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
-                        Modifier.blur(radius = 22.dp, edgeTreatment = BlurredEdgeTreatment.Unbounded)
+                        Modifier.blur(radius = 20.dp, edgeTreatment = BlurredEdgeTreatment.Unbounded)
                     } else {
                         Modifier
                     }
                 )
         )
 
-        Box(
-            modifier = Modifier
-                .fillMaxSize()
-                .background(
-                    Brush.verticalGradient(
-                        colors = listOf(
-                            GlassBackdropDeepTop,
-                            GlassBackdropMid,
-                            GlassBackdropBottom
-                        )
+        // Drifting caustic aurora orbs + deep emerald glass atmosphere
+        Canvas(modifier = Modifier.fillMaxSize()) {
+            drawRect(
+                brush = Brush.verticalGradient(
+                    colors = listOf(
+                        SplashScrimTop,
+                        SplashScrimCenter,
+                        SplashScrimBottom
                     )
                 )
-                .drawBehind {
-                    drawCircle(
-                        brush = Brush.radialGradient(
-                            colors = listOf(
-                                ambientPrimary.copy(alpha = 0.42f),
-                                Color.Transparent
-                            ),
-                            center = Offset(size.width * 0.14f, size.height * 0.24f),
-                            radius = size.width * 0.72f
-                        )
-                    )
-                    drawCircle(
-                        brush = Brush.radialGradient(
-                            colors = listOf(
-                                ambientSecondary.copy(alpha = 0.26f),
-                                Color.Transparent
-                            ),
-                            center = Offset(size.width * 0.88f, size.height * 0.44f),
-                            radius = size.width * 0.65f
-                        )
-                    )
-                    drawCircle(
-                        brush = Brush.radialGradient(
-                            colors = listOf(
-                                ambientTertiary.copy(alpha = 0.34f),
-                                Color.Transparent
-                            ),
-                            center = Offset(size.width * 0.26f, size.height * 0.78f),
-                            radius = size.width * 0.75f
-                        )
-                    )
-                }
-        )
+            )
+            val orb1 = Offset(
+                x = size.width * (0.16f + 0.08f * cos(causticPhase)),
+                y = size.height * (0.20f + 0.05f * sin(causticPhase))
+            )
+            val orb2 = Offset(
+                x = size.width * (0.86f + 0.07f * sin(causticPhase * 0.85f)),
+                y = size.height * (0.45f + 0.06f * cos(causticPhase * 0.9f))
+            )
+            val orb3 = Offset(
+                x = size.width * (0.28f + 0.09f * cos(causticPhase * 1.1f + 1.2f)),
+                y = size.height * (0.80f + 0.05f * sin(causticPhase * 0.8f))
+            )
+            drawCircle(
+                brush = Brush.radialGradient(
+                    colors = listOf(SplashGlassMintAccent.copy(alpha = 0.36f), Color.Transparent),
+                    center = orb1,
+                    radius = size.width * 0.68f
+                ),
+                center = orb1,
+                radius = size.width * 0.68f
+            )
+            drawCircle(
+                brush = Brush.radialGradient(
+                    colors = listOf(SplashGlassTealAccent.copy(alpha = 0.28f), Color.Transparent),
+                    center = orb2,
+                    radius = size.width * 0.62f
+                ),
+                center = orb2,
+                radius = size.width * 0.62f
+            )
+            drawCircle(
+                brush = Brush.radialGradient(
+                    colors = listOf(SplashGlassWarmAccent.copy(alpha = 0.22f), Color.Transparent),
+                    center = orb3,
+                    radius = size.width * 0.65f
+                ),
+                center = orb3,
+                radius = size.width * 0.65f
+            )
+        }
 
         Column(
             modifier = Modifier
                 .fillMaxSize()
+                .statusBarsPadding()
                 .navigationBarsPadding()
+                .displayCutoutPadding()
                 .imePadding()
-                .verticalScroll(rememberScrollState()),
+                .verticalScroll(rememberScrollState())
+                .padding(horizontal = 20.dp, vertical = 14.dp),
             horizontalAlignment = Alignment.CenterHorizontally
         ) {
-            // Crisp hero header window over the blurred atmospheric canvas
-            Box(
+            // Floating iOS Liquid Glass Brand Header with High-Contrast Smoked Backing
+            val headerShape = RoundedCornerShape(24.dp)
+            Row(
                 modifier = Modifier
+                    .widthIn(max = 520.dp)
                     .fillMaxWidth()
-                    .height(152.dp)
-            ) {
-                Image(
-                    painter = painterResource(id = R.drawable.img_dumingag_hero),
-                    contentDescription = "Dumingag Valley Rice Terraces and Highlands",
-                    modifier = Modifier.fillMaxSize(),
-                    contentScale = ContentScale.Crop
-                )
-                Box(
-                    modifier = Modifier
-                        .fillMaxSize()
-                        .background(
-                            Brush.verticalGradient(
-                                colors = listOf(
-                                    GlassHeroScrimTop,
-                                    GlassHeroScrimBottom
-                                )
+                    .padding(top = 6.dp, bottom = 14.dp)
+                    .clip(headerShape)
+                    .background(
+                        Brush.verticalGradient(
+                            colors = listOf(
+                                SplashScrimBottom.copy(alpha = 0.66f),
+                                SplashGlassPanelBottom.copy(alpha = 0.78f)
                             )
                         )
-                )
-                Column(
-                    modifier = Modifier
-                        .fillMaxSize()
-                        .statusBarsPadding()
-                        .padding(horizontal = 24.dp, vertical = 14.dp),
-                    verticalArrangement = Arrangement.Bottom
+                    )
+                    .drawBehind {
+                        drawRoundRect(
+                            brush = Brush.verticalGradient(
+                                colors = listOf(
+                                    SplashGlassSpecularTop.copy(alpha = 0.22f),
+                                    Color.Transparent
+                                ),
+                                startY = 0f,
+                                endY = size.height * 0.42f
+                            ),
+                            cornerRadius = CornerRadius(24.dp.toPx(), 24.dp.toPx())
+                        )
+                    }
+                    .border(
+                        width = 1.2.dp,
+                        brush = Brush.linearGradient(
+                            colors = listOf(
+                                SplashGlassSpecularTop.copy(alpha = 0.85f),
+                                SplashGlassSpecularMid,
+                                SplashGlassSpecularEdge
+                            )
+                        ),
+                        shape = headerShape
+                    )
+                    .padding(horizontal = 14.dp, vertical = 14.dp),
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(12.dp)
+            ) {
+                Box(
+                    contentAlignment = Alignment.Center,
+                    modifier = Modifier.size(60.dp)
                 ) {
-                    Surface(
-                        color = MaterialTheme.colorScheme.secondary.copy(alpha = 0.92f),
-                        shape = RoundedCornerShape(50),
-                        border = BorderStroke(1.dp, Color.White.copy(alpha = 0.4f)),
-                        modifier = Modifier.padding(bottom = 6.dp)
+                    Canvas(modifier = Modifier.fillMaxSize()) {
+                        drawCircle(
+                            brush = Brush.linearGradient(
+                                colors = listOf(SplashGlassPillActiveTop, SplashGlassPanelBottom)
+                            )
+                        )
+                        drawCircle(
+                            brush = Brush.linearGradient(
+                                colors = listOf(SplashGlassSpecularTop, SplashGlassSpecularEdge)
+                            ),
+                            style = Stroke(width = 1.5.dp.toPx())
+                        )
+                        val pad = 3.dp.toPx()
+                        drawArc(
+                            brush = Brush.sweepGradient(
+                                colors = listOf(
+                                    Color.Transparent,
+                                    SplashGlassSpecularTop,
+                                    SplashGlassMintAccent,
+                                    Color.Transparent
+                                )
+                            ),
+                            startAngle = crestOrbitAngle,
+                            sweepAngle = 95f,
+                            useCenter = false,
+                            topLeft = Offset(pad, pad),
+                            size = androidx.compose.ui.geometry.Size(size.width - pad * 2, size.height - pad * 2),
+                            style = Stroke(width = 2.2.dp.toPx(), cap = StrokeCap.Round)
+                        )
+                    }
+                    Image(
+                        painter = painterResource(id = R.drawable.ic_dumingag_foreground),
+                        contentDescription = "Dumingag Valley Crest",
+                        contentScale = ContentScale.Crop,
+                        modifier = Modifier
+                            .size(46.dp)
+                            .clip(CircleShape)
+                            .border(1.5.dp, SplashGlassSpecularTop, CircleShape)
+                    )
+                }
+
+                Column(
+                    modifier = Modifier.weight(1f),
+                    verticalArrangement = Arrangement.spacedBy(4.dp)
+                ) {
+                    Box(
+                        modifier = Modifier
+                            .clip(RoundedCornerShape(50))
+                            .background(SplashScrimBottom.copy(alpha = 0.72f))
+                            .border(
+                                width = 1.dp,
+                                color = SplashGlassMintAccent.copy(alpha = 0.65f),
+                                shape = RoundedCornerShape(50)
+                            )
+                            .padding(horizontal = 10.dp, vertical = 3.dp)
                     ) {
                         Text(
-                            text = "ZAMBOANGA DEL SUR • MINDANAO",
+                            text = "ZAMBOANGA DEL SUR · MINDANAO",
                             style = MaterialTheme.typography.labelSmall,
                             fontWeight = FontWeight.Bold,
-                            color = MaterialTheme.colorScheme.onSecondary,
-                            modifier = Modifier.padding(horizontal = 10.dp, vertical = 4.dp)
+                            letterSpacing = 0.5.sp,
+                            color = SplashGlassMintAccent,
+                            maxLines = 2
                         )
                     }
                     Text(
                         text = "Dumingag Travel Guide",
-                        style = MaterialTheme.typography.headlineMedium,
-                        fontWeight = FontWeight.Bold,
-                        color = Color.White
+                        style = MaterialTheme.typography.titleLarge.copy(
+                            fontSize = 21.sp,
+                            lineHeight = 25.sp
+                        ),
+                        fontWeight = FontWeight.ExtraBold,
+                        color = SplashGlassTextPrimary,
+                        maxLines = 2,
+                        modifier = Modifier.testTag("auth_header_title")
                     )
                     Text(
-                        text = "Explore local spots, offline maps & community reviews",
-                        style = MaterialTheme.typography.bodySmall,
-                        color = Color.White.copy(alpha = 0.92f)
+                        text = "Offline maps, local spots & community reviews",
+                        style = MaterialTheme.typography.bodySmall.copy(
+                            lineHeight = 18.sp
+                        ),
+                        fontWeight = FontWeight.Medium,
+                        color = SplashGlassTextPrimary.copy(alpha = 0.90f),
+                        maxLines = 2,
+                        modifier = Modifier.testTag("auth_header_subtitle")
                     )
                 }
             }
@@ -282,8 +423,7 @@ fun AuthScreen(
             Column(
                 modifier = Modifier
                     .widthIn(max = 520.dp)
-                    .fillMaxWidth()
-                    .padding(horizontal = 20.dp, vertical = 14.dp),
+                    .fillMaxWidth(),
                 verticalArrangement = Arrangement.spacedBy(16.dp)
             ) {
                 if (activeVerificationEmail != null) {
@@ -342,21 +482,23 @@ fun AuthScreen(
                         }
                     )
                 } else {
-                    val darkMode = isSystemInDarkTheme()
+                    // High-contrast frosted glass input colors — luminous white text on translucent dark glass
                     val fieldColors = OutlinedTextFieldDefaults.colors(
-                        focusedContainerColor = MaterialTheme.colorScheme.surface.copy(alpha = if (darkMode) 0.90f else 0.96f),
-                        unfocusedContainerColor = MaterialTheme.colorScheme.surface.copy(alpha = if (darkMode) 0.78f else 0.88f),
-                        disabledContainerColor = MaterialTheme.colorScheme.surface.copy(alpha = 0.60f),
-                        focusedTextColor = MaterialTheme.colorScheme.onSurface,
-                        unfocusedTextColor = MaterialTheme.colorScheme.onSurface,
-                        focusedLabelColor = MaterialTheme.colorScheme.primary,
-                        unfocusedLabelColor = MaterialTheme.colorScheme.onSurfaceVariant,
-                        focusedBorderColor = MaterialTheme.colorScheme.primary,
-                        unfocusedBorderColor = MaterialTheme.colorScheme.outline.copy(alpha = 0.85f),
-                        focusedLeadingIconColor = MaterialTheme.colorScheme.primary,
-                        unfocusedLeadingIconColor = MaterialTheme.colorScheme.onSurfaceVariant,
-                        focusedTrailingIconColor = MaterialTheme.colorScheme.primary,
-                        unfocusedTrailingIconColor = MaterialTheme.colorScheme.onSurfaceVariant
+                        focusedContainerColor = SplashGlassPillIdle,
+                        unfocusedContainerColor = SplashGlassTrackBg,
+                        disabledContainerColor = SplashGlassTrackBg.copy(alpha = 0.45f),
+                        focusedTextColor = SplashGlassTextPrimary,
+                        unfocusedTextColor = SplashGlassTextPrimary,
+                        disabledTextColor = SplashGlassTextSecondary.copy(alpha = 0.7f),
+                        cursorColor = SplashGlassMintAccent,
+                        focusedLabelColor = SplashGlassMintAccent,
+                        unfocusedLabelColor = SplashGlassTextSecondary,
+                        focusedBorderColor = SplashGlassSpecularTop,
+                        unfocusedBorderColor = SplashGlassSpecularMid,
+                        focusedLeadingIconColor = SplashGlassMintAccent,
+                        unfocusedLeadingIconColor = SplashGlassTextSecondary,
+                        focusedTrailingIconColor = SplashGlassMintAccent,
+                        unfocusedTrailingIconColor = SplashGlassTextSecondary
                     )
 
                     LiquidGlassCard(
@@ -370,20 +512,21 @@ fun AuthScreen(
                                 .padding(20.dp),
                             verticalArrangement = Arrangement.spacedBy(12.dp)
                         ) {
-                            // Frosted glass segmented Sign In / Create Account pill bar
+                            // iOS Liquid Glass Segmented Control (Sign In / Create Account)
                             Box(
                                 modifier = Modifier
                                     .fillMaxWidth()
-                                    .clip(RoundedCornerShape(16.dp))
-                                    .background(
-                                        MaterialTheme.colorScheme.surfaceVariant.copy(
-                                            alpha = if (darkMode) 0.82f else 0.88f
-                                        )
-                                    )
+                                    .clip(RoundedCornerShape(18.dp))
+                                    .background(SplashGlassTrackBg)
                                     .border(
                                         width = 1.dp,
-                                        color = if (darkMode) GlassDarkBorderMid else GlassLightHighlight.copy(alpha = 0.75f),
-                                        shape = RoundedCornerShape(16.dp)
+                                        brush = Brush.linearGradient(
+                                            colors = listOf(
+                                                SplashGlassSpecularTop.copy(alpha = 0.65f),
+                                                SplashGlassSpecularEdge
+                                            )
+                                        ),
+                                        shape = RoundedCornerShape(18.dp)
                                     )
                                     .padding(4.dp)
                             ) {
@@ -431,7 +574,7 @@ fun AuthScreen(
                                     text = if (registering) "Create Your Account" else "Welcome Back",
                                     style = MaterialTheme.typography.headlineSmall,
                                     fontWeight = FontWeight.Bold,
-                                    color = MaterialTheme.colorScheme.onSurface
+                                    color = SplashGlassTextPrimary
                                 )
                                 Text(
                                     text = if (registering) {
@@ -440,7 +583,7 @@ fun AuthScreen(
                                         "Sign in with your verified email & password or use Google Sign-In."
                                     },
                                     style = MaterialTheme.typography.bodySmall,
-                                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                                    color = SplashGlassTextSecondary
                                 )
                             }
 
@@ -458,7 +601,7 @@ fun AuthScreen(
                                     },
                                     singleLine = true,
                                     enabled = !isLoading,
-                                    shape = RoundedCornerShape(15.dp),
+                                    shape = RoundedCornerShape(16.dp),
                                     colors = fieldColors,
                                     keyboardOptions = KeyboardOptions(
                                         keyboardType = KeyboardType.Text,
@@ -479,7 +622,7 @@ fun AuthScreen(
                                 },
                                 singleLine = true,
                                 enabled = !isLoading,
-                                shape = RoundedCornerShape(15.dp),
+                                shape = RoundedCornerShape(16.dp),
                                 colors = fieldColors,
                                 keyboardOptions = KeyboardOptions(
                                     keyboardType = KeyboardType.Email,
@@ -510,7 +653,7 @@ fun AuthScreen(
                                 },
                                 singleLine = true,
                                 enabled = !isLoading,
-                                shape = RoundedCornerShape(15.dp),
+                                shape = RoundedCornerShape(16.dp),
                                 colors = fieldColors,
                                 visualTransformation = if (passwordVisible) VisualTransformation.None else PasswordVisualTransformation(),
                                 keyboardOptions = KeyboardOptions(
@@ -528,9 +671,9 @@ fun AuthScreen(
                                 exit = fadeOut(tween(160)) + shrinkVertically(tween(180))
                             ) {
                                 Surface(
-                                    color = MaterialTheme.colorScheme.secondaryContainer.copy(alpha = 0.88f),
-                                    shape = RoundedCornerShape(12.dp),
-                                    border = BorderStroke(1.dp, MaterialTheme.colorScheme.secondary.copy(alpha = 0.25f)),
+                                    color = SplashGlassWarmAccent.copy(alpha = 0.16f),
+                                    shape = RoundedCornerShape(14.dp),
+                                    border = BorderStroke(1.dp, SplashGlassWarmAccent.copy(alpha = 0.45f)),
                                     modifier = Modifier.fillMaxWidth()
                                 ) {
                                     Row(
@@ -541,14 +684,14 @@ fun AuthScreen(
                                         Icon(
                                             imageVector = Icons.Default.VerifiedUser,
                                             contentDescription = null,
-                                            tint = MaterialTheme.colorScheme.secondary,
+                                            tint = SplashGlassWarmAccent,
                                             modifier = Modifier.size(18.dp)
                                         )
                                         Text(
                                             text = "Email verification required before your first login.",
                                             style = MaterialTheme.typography.bodySmall,
                                             fontWeight = FontWeight.Medium,
-                                            color = MaterialTheme.colorScheme.onSecondaryContainer
+                                            color = SplashGlassTextPrimary
                                         )
                                     }
                                 }
@@ -557,16 +700,16 @@ fun AuthScreen(
                             if (errorMessage != null) {
                                 Card(
                                     colors = CardDefaults.cardColors(
-                                        containerColor = MaterialTheme.colorScheme.errorContainer
+                                        containerColor = MaterialTheme.colorScheme.errorContainer.copy(alpha = 0.94f)
                                     ),
-                                    border = BorderStroke(1.dp, MaterialTheme.colorScheme.error.copy(alpha = 0.35f)),
-                                    shape = RoundedCornerShape(12.dp),
+                                    border = BorderStroke(1.dp, MaterialTheme.colorScheme.error.copy(alpha = 0.55f)),
+                                    shape = RoundedCornerShape(14.dp),
                                     modifier = Modifier.fillMaxWidth()
                                 ) {
                                     Text(
                                         text = errorMessage.orEmpty(),
                                         style = MaterialTheme.typography.bodySmall,
-                                        fontWeight = FontWeight.Medium,
+                                        fontWeight = FontWeight.SemiBold,
                                         color = MaterialTheme.colorScheme.onErrorContainer,
                                         modifier = Modifier.padding(12.dp)
                                     )
@@ -576,17 +719,17 @@ fun AuthScreen(
                             if (infoMessage != null) {
                                 Card(
                                     colors = CardDefaults.cardColors(
-                                        containerColor = MaterialTheme.colorScheme.primaryContainer
+                                        containerColor = SplashGlassMintAccent.copy(alpha = 0.22f)
                                     ),
-                                    border = BorderStroke(1.dp, MaterialTheme.colorScheme.primary.copy(alpha = 0.30f)),
-                                    shape = RoundedCornerShape(12.dp),
+                                    border = BorderStroke(1.dp, SplashGlassMintAccent.copy(alpha = 0.55f)),
+                                    shape = RoundedCornerShape(14.dp),
                                     modifier = Modifier.fillMaxWidth()
                                 ) {
                                     Text(
                                         text = infoMessage.orEmpty(),
                                         style = MaterialTheme.typography.bodySmall,
-                                        fontWeight = FontWeight.Medium,
-                                        color = MaterialTheme.colorScheme.onPrimaryContainer,
+                                        fontWeight = FontWeight.SemiBold,
+                                        color = SplashGlassTextPrimary,
                                         modifier = Modifier.padding(12.dp)
                                     )
                                 }
@@ -631,14 +774,18 @@ fun AuthScreen(
                                     }
                                 },
                                 enabled = submitEnabled,
-                                shape = RoundedCornerShape(16.dp),
+                                shape = RoundedCornerShape(18.dp),
                                 colors = ButtonDefaults.buttonColors(
-                                    containerColor = MaterialTheme.colorScheme.primary,
-                                    contentColor = MaterialTheme.colorScheme.onPrimary,
-                                    disabledContainerColor = MaterialTheme.colorScheme.primary.copy(alpha = 0.42f),
-                                    disabledContentColor = MaterialTheme.colorScheme.onPrimary.copy(alpha = 0.88f)
+                                    containerColor = SplashGlassThumbTop,
+                                    contentColor = EmeraldPrimary,
+                                    disabledContainerColor = SplashGlassPillActiveTop.copy(alpha = 0.26f),
+                                    disabledContentColor = SplashGlassTextSecondary.copy(alpha = 0.78f)
                                 ),
-                                elevation = ButtonDefaults.buttonElevation(defaultElevation = 3.dp),
+                                border = BorderStroke(
+                                    width = 1.25.dp,
+                                    color = if (submitEnabled) SplashGlassSpecularTop else SplashGlassSpecularEdge
+                                ),
+                                elevation = ButtonDefaults.buttonElevation(defaultElevation = 4.dp),
                                 contentPadding = PaddingValues(horizontal = 20.dp, vertical = 14.dp),
                                 modifier = Modifier
                                     .fillMaxWidth()
@@ -648,7 +795,7 @@ fun AuthScreen(
                                 if (pendingMethod == "email") {
                                     CircularProgressIndicator(
                                         modifier = Modifier.size(20.dp),
-                                        color = MaterialTheme.colorScheme.onPrimary,
+                                        color = EmeraldPrimary,
                                         strokeWidth = 2.dp
                                     )
                                     Spacer(modifier = Modifier.width(10.dp))
@@ -657,7 +804,7 @@ fun AuthScreen(
                                     Text(
                                         text = if (registering) "Create & Verify Account" else "Sign In to Guide",
                                         style = MaterialTheme.typography.labelLarge,
-                                        fontWeight = FontWeight.Bold
+                                        fontWeight = FontWeight.ExtraBold
                                     )
                                 }
                             }
@@ -669,17 +816,17 @@ fun AuthScreen(
                             ) {
                                 HorizontalDivider(
                                     modifier = Modifier.weight(1f),
-                                    color = MaterialTheme.colorScheme.outline.copy(alpha = 0.55f)
+                                    color = SplashGlassSpecularEdge
                                 )
                                 Text(
                                     text = "OR",
                                     style = MaterialTheme.typography.labelSmall,
                                     fontWeight = FontWeight.SemiBold,
-                                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                                    color = SplashGlassTextSecondary
                                 )
                                 HorizontalDivider(
                                     modifier = Modifier.weight(1f),
-                                    color = MaterialTheme.colorScheme.outline.copy(alpha = 0.55f)
+                                    color = SplashGlassSpecularEdge
                                 )
                             }
 
@@ -707,12 +854,20 @@ fun AuthScreen(
                                     )
                                 },
                                 enabled = !isLoading,
-                                shape = RoundedCornerShape(16.dp),
+                                shape = RoundedCornerShape(18.dp),
                                 colors = ButtonDefaults.outlinedButtonColors(
-                                    containerColor = MaterialTheme.colorScheme.surface.copy(alpha = if (darkMode) 0.90f else 0.96f),
-                                    contentColor = MaterialTheme.colorScheme.onSurface
+                                    containerColor = SplashGlassPillIdle,
+                                    contentColor = SplashGlassTextPrimary
                                 ),
-                                border = BorderStroke(1.dp, MaterialTheme.colorScheme.outline.copy(alpha = 0.85f)),
+                                border = BorderStroke(
+                                    width = 1.2.dp,
+                                    brush = Brush.linearGradient(
+                                        colors = listOf(
+                                            SplashGlassSpecularTop.copy(alpha = 0.78f),
+                                            SplashGlassSpecularEdge
+                                        )
+                                    )
+                                ),
                                 contentPadding = PaddingValues(horizontal = 20.dp, vertical = 12.dp),
                                 modifier = Modifier
                                     .fillMaxWidth()
@@ -722,7 +877,7 @@ fun AuthScreen(
                                 if (pendingMethod == "google") {
                                     CircularProgressIndicator(
                                         modifier = Modifier.size(22.dp),
-                                        color = MaterialTheme.colorScheme.primary,
+                                        color = SplashGlassMintAccent,
                                         strokeWidth = 2.dp
                                     )
                                 } else {
@@ -732,7 +887,7 @@ fun AuthScreen(
                                         text = if (registering) "Sign up with Google" else "Continue with Google",
                                         style = MaterialTheme.typography.labelLarge,
                                         fontWeight = FontWeight.SemiBold,
-                                        color = MaterialTheme.colorScheme.onSurface,
+                                        color = SplashGlassTextPrimary,
                                         maxLines = 2,
                                         overflow = TextOverflow.Ellipsis
                                     )
@@ -752,7 +907,7 @@ fun AuthScreen(
                                     },
                                     enabled = !isLoading,
                                     colors = ButtonDefaults.textButtonColors(
-                                        contentColor = MaterialTheme.colorScheme.primary
+                                        contentColor = SplashGlassMintAccent
                                     ),
                                     modifier = Modifier
                                         .heightIn(min = 48.dp)
@@ -777,7 +932,7 @@ fun AuthScreen(
                         text = "What's Inside Dumingag",
                         style = MaterialTheme.typography.titleSmall,
                         fontWeight = FontWeight.Bold,
-                        color = Color.White.copy(alpha = 0.94f),
+                        color = SplashGlassTextPrimary,
                         modifier = Modifier.padding(horizontal = 4.dp)
                     )
                     FeatureHighlightRow(
@@ -810,52 +965,51 @@ fun AuthScreen(
 @Composable
 private fun LiquidGlassCard(
     modifier: Modifier = Modifier,
-    shape: RoundedCornerShape = RoundedCornerShape(28.dp),
+    shape: RoundedCornerShape = RoundedCornerShape(30.dp),
     content: @Composable ColumnScope.() -> Unit
 ) {
-    val darkMode = isSystemInDarkTheme()
-    val glassFillTop = MaterialTheme.colorScheme.surface.copy(alpha = if (darkMode) 0.88f else 0.91f)
-    val glassFillBottom = if (darkMode) {
-        MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.82f)
-    } else {
-        MaterialTheme.colorScheme.surface.copy(alpha = 0.84f)
-    }
     val borderBrush = Brush.linearGradient(
-        colors = if (darkMode) {
-            listOf(GlassDarkHighlight, GlassDarkBorderMid, GlassDarkBorderTail)
-        } else {
-            listOf(GlassLightHighlight, GlassLightBorderMid, GlassLightBorderTail)
-        },
+        colors = listOf(
+            SplashGlassSpecularTop,
+            SplashGlassSpecularMid,
+            SplashGlassSpecularEdge
+        ),
         start = Offset.Zero,
         end = Offset(900f, 1200f)
     )
-    val sheenColor = if (darkMode) Color.White.copy(alpha = 0.08f) else Color.White.copy(alpha = 0.48f)
 
     Box(
         modifier = modifier
             .shadow(
-                elevation = 18.dp,
+                elevation = 20.dp,
                 shape = shape,
-                ambientColor = Color.Black.copy(alpha = 0.30f),
-                spotColor = Color.Black.copy(alpha = 0.30f)
+                ambientColor = Color.Black.copy(alpha = 0.40f),
+                spotColor = Color.Black.copy(alpha = 0.40f)
             )
             .clip(shape)
             .background(
                 Brush.verticalGradient(
-                    colors = listOf(glassFillTop, glassFillBottom)
+                    colors = listOf(
+                        SplashGlassPanelTop,
+                        SplashGlassPanelBottom
+                    )
                 )
             )
             .drawBehind {
-                // Soft top specular highlight band characteristic of curved liquid glass
-                drawRect(
+                // Curved top specular liquid sheen characteristic of iOS Liquid Glass
+                drawRoundRect(
                     brush = Brush.verticalGradient(
-                        colors = listOf(sheenColor, Color.Transparent),
+                        colors = listOf(
+                            SplashGlassSpecularTop.copy(alpha = 0.22f),
+                            Color.Transparent
+                        ),
                         startY = 0f,
-                        endY = size.height * 0.24f
-                    )
+                        endY = size.height * 0.28f
+                    ),
+                    cornerRadius = CornerRadius(30.dp.toPx(), 30.dp.toPx())
                 )
             }
-            .border(width = 1.25.dp, brush = borderBrush, shape = shape)
+            .border(width = 1.4.dp, brush = borderBrush, shape = shape)
     ) {
         Column(modifier = Modifier.fillMaxWidth(), content = content)
     }
@@ -869,40 +1023,47 @@ private fun AuthModeTab(
     modifier: Modifier = Modifier,
     onClick: () -> Unit
 ) {
-    val containerColor by animateColorAsState(
-        targetValue = if (selected) MaterialTheme.colorScheme.primary else Color.Transparent,
-        animationSpec = tween(durationMillis = 200),
-        label = "auth_tab_bg"
-    )
     val labelColor by animateColorAsState(
-        targetValue = if (selected) MaterialTheme.colorScheme.onPrimary else MaterialTheme.colorScheme.onSurface,
+        targetValue = if (selected) SplashGlassTextPrimary else SplashGlassTextSecondary.copy(alpha = 0.85f),
         animationSpec = tween(durationMillis = 200),
         label = "auth_tab_fg"
     )
-    val tabShape = RoundedCornerShape(12.dp)
+    val tabScale by animateFloatAsState(
+        targetValue = if (selected) 1f else 0.98f,
+        animationSpec = spring(dampingRatio = Spring.DampingRatioMediumBouncy),
+        label = "auth_tab_scale"
+    )
+    val tabShape = RoundedCornerShape(14.dp)
 
     Box(
         contentAlignment = Alignment.Center,
         modifier = modifier
+            .scale(tabScale)
             .heightIn(min = 48.dp)
-            .then(
-                if (selected) {
-                    Modifier.shadow(elevation = 4.dp, shape = tabShape)
-                } else {
-                    Modifier
-                }
-            )
             .clip(tabShape)
-            .background(containerColor)
             .then(
                 if (selected) {
-                    Modifier.border(
-                        width = 1.dp,
-                        color = Color.White.copy(alpha = 0.28f),
-                        shape = tabShape
-                    )
-                } else {
                     Modifier
+                        .background(
+                            Brush.linearGradient(
+                                colors = listOf(
+                                    SplashGlassPillActiveTop,
+                                    SplashGlassPillActiveBottom
+                                )
+                            )
+                        )
+                        .border(
+                            width = 1.25.dp,
+                            brush = Brush.linearGradient(
+                                colors = listOf(
+                                    SplashGlassSpecularTop,
+                                    SplashGlassSpecularMid
+                                )
+                            ),
+                            shape = tabShape
+                        )
+                } else {
+                    Modifier.background(Color.Transparent)
                 }
             )
             .clickable(enabled = enabled, onClick = onClick)
@@ -911,7 +1072,7 @@ private fun AuthModeTab(
         Text(
             text = label,
             style = MaterialTheme.typography.labelLarge,
-            fontWeight = if (selected) FontWeight.Bold else FontWeight.SemiBold,
+            fontWeight = if (selected) FontWeight.Bold else FontWeight.Medium,
             color = labelColor,
             maxLines = 1,
             overflow = TextOverflow.Ellipsis
@@ -943,15 +1104,16 @@ private fun EmailVerificationCard(
             verticalArrangement = Arrangement.spacedBy(12.dp)
         ) {
             Surface(
-                color = MaterialTheme.colorScheme.primaryContainer,
-                shape = RoundedCornerShape(18.dp),
-                modifier = Modifier.size(64.dp)
+                color = SplashGlassMintAccent.copy(alpha = 0.20f),
+                shape = RoundedCornerShape(20.dp),
+                border = BorderStroke(1.2.dp, SplashGlassSpecularTop.copy(alpha = 0.65f)),
+                modifier = Modifier.size(66.dp)
             ) {
                 Box(contentAlignment = Alignment.Center) {
                     Icon(
                         imageVector = Icons.Default.MarkEmailRead,
                         contentDescription = "Email verification required",
-                        tint = MaterialTheme.colorScheme.primary,
+                        tint = SplashGlassMintAccent,
                         modifier = Modifier.size(34.dp)
                     )
                 }
@@ -961,30 +1123,30 @@ private fun EmailVerificationCard(
                 text = "Verify Your Email",
                 style = MaterialTheme.typography.headlineSmall,
                 fontWeight = FontWeight.Bold,
-                color = MaterialTheme.colorScheme.onSurface,
+                color = SplashGlassTextPrimary,
                 textAlign = TextAlign.Center
             )
 
             Text(
                 text = "We sent a verification link to $email. Open the link in your inbox before accessing your Dumingag account.",
                 style = MaterialTheme.typography.bodyMedium,
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                color = SplashGlassTextSecondary,
                 textAlign = TextAlign.Center
             )
 
             if (errorMessage != null) {
                 Card(
                     colors = CardDefaults.cardColors(
-                        containerColor = MaterialTheme.colorScheme.errorContainer
+                        containerColor = MaterialTheme.colorScheme.errorContainer.copy(alpha = 0.94f)
                     ),
-                    border = BorderStroke(1.dp, MaterialTheme.colorScheme.error.copy(alpha = 0.35f)),
-                    shape = RoundedCornerShape(12.dp),
+                    border = BorderStroke(1.dp, MaterialTheme.colorScheme.error.copy(alpha = 0.50f)),
+                    shape = RoundedCornerShape(14.dp),
                     modifier = Modifier.fillMaxWidth()
                 ) {
                     Text(
                         text = errorMessage,
                         style = MaterialTheme.typography.bodySmall,
-                        fontWeight = FontWeight.Medium,
+                        fontWeight = FontWeight.SemiBold,
                         color = MaterialTheme.colorScheme.onErrorContainer,
                         modifier = Modifier.padding(12.dp)
                     )
@@ -994,17 +1156,17 @@ private fun EmailVerificationCard(
             if (infoMessage != null) {
                 Card(
                     colors = CardDefaults.cardColors(
-                        containerColor = MaterialTheme.colorScheme.primaryContainer
+                        containerColor = SplashGlassMintAccent.copy(alpha = 0.22f)
                     ),
-                    border = BorderStroke(1.dp, MaterialTheme.colorScheme.primary.copy(alpha = 0.30f)),
-                    shape = RoundedCornerShape(12.dp),
+                    border = BorderStroke(1.dp, SplashGlassMintAccent.copy(alpha = 0.55f)),
+                    shape = RoundedCornerShape(14.dp),
                     modifier = Modifier.fillMaxWidth()
                 ) {
                     Text(
                         text = infoMessage,
                         style = MaterialTheme.typography.bodySmall,
-                        fontWeight = FontWeight.Medium,
-                        color = MaterialTheme.colorScheme.onPrimaryContainer,
+                        fontWeight = FontWeight.SemiBold,
+                        color = SplashGlassTextPrimary,
                         modifier = Modifier.padding(12.dp)
                     )
                 }
@@ -1013,7 +1175,12 @@ private fun EmailVerificationCard(
             Button(
                 onClick = onCheckVerification,
                 enabled = !isLoading,
-                shape = RoundedCornerShape(16.dp),
+                shape = RoundedCornerShape(18.dp),
+                colors = ButtonDefaults.buttonColors(
+                    containerColor = SplashGlassThumbTop,
+                    contentColor = EmeraldPrimary
+                ),
+                border = BorderStroke(1.2.dp, SplashGlassSpecularTop),
                 modifier = Modifier
                     .fillMaxWidth()
                     .heightIn(min = 52.dp)
@@ -1022,24 +1189,25 @@ private fun EmailVerificationCard(
                 if (pendingMethod == "verify_check") {
                     CircularProgressIndicator(
                         modifier = Modifier.size(20.dp),
-                        color = MaterialTheme.colorScheme.onPrimary,
+                        color = EmeraldPrimary,
                         strokeWidth = 2.dp
                     )
                     Spacer(modifier = Modifier.width(8.dp))
                     Text("Checking…")
                 } else {
-                    Text("I've Verified — Continue", fontWeight = FontWeight.Bold)
+                    Text("I've Verified — Continue", fontWeight = FontWeight.ExtraBold)
                 }
             }
 
             OutlinedButton(
                 onClick = onResendVerification,
                 enabled = !isLoading,
-                shape = RoundedCornerShape(16.dp),
+                shape = RoundedCornerShape(18.dp),
                 colors = ButtonDefaults.outlinedButtonColors(
-                    containerColor = MaterialTheme.colorScheme.surface.copy(alpha = 0.90f),
-                    contentColor = MaterialTheme.colorScheme.primary
+                    containerColor = SplashGlassPillIdle,
+                    contentColor = SplashGlassTextPrimary
                 ),
+                border = BorderStroke(1.dp, SplashGlassSpecularMid),
                 modifier = Modifier
                     .fillMaxWidth()
                     .heightIn(min = 48.dp)
@@ -1056,6 +1224,7 @@ private fun EmailVerificationCard(
             TextButton(
                 onClick = onBackToSignIn,
                 enabled = !isLoading,
+                colors = ButtonDefaults.textButtonColors(contentColor = SplashGlassMintAccent),
                 modifier = Modifier
                     .heightIn(min = 48.dp)
                     .testTag("back_to_sign_in_button")
@@ -1072,35 +1241,43 @@ private fun FeatureHighlightRow(
     title: String,
     subtitle: String
 ) {
-    val darkMode = isSystemInDarkTheme()
-    val cardShape = RoundedCornerShape(18.dp)
+    val cardShape = RoundedCornerShape(20.dp)
     Row(
         modifier = Modifier
             .fillMaxWidth()
             .clip(cardShape)
             .background(
-                MaterialTheme.colorScheme.surface.copy(
-                    alpha = if (darkMode) 0.84f else 0.90f
+                Brush.linearGradient(
+                    colors = listOf(
+                        SplashGlassPanelTop,
+                        SplashGlassPanelBottom
+                    )
                 )
             )
             .border(
-                width = 1.dp,
-                color = if (darkMode) GlassDarkBorderMid else GlassLightHighlight.copy(alpha = 0.72f),
+                width = 1.1.dp,
+                brush = Brush.linearGradient(
+                    colors = listOf(
+                        SplashGlassSpecularTop.copy(alpha = 0.65f),
+                        SplashGlassSpecularEdge
+                    )
+                ),
                 shape = cardShape
             )
             .padding(14.dp),
         verticalAlignment = Alignment.CenterVertically
     ) {
         Surface(
-            color = MaterialTheme.colorScheme.primaryContainer,
-            shape = RoundedCornerShape(12.dp),
-            modifier = Modifier.size(42.dp)
+            color = SplashGlassMintAccent.copy(alpha = 0.18f),
+            shape = RoundedCornerShape(13.dp),
+            border = BorderStroke(1.dp, SplashGlassMintAccent.copy(alpha = 0.45f)),
+            modifier = Modifier.size(44.dp)
         ) {
             Box(contentAlignment = Alignment.Center) {
                 Icon(
                     imageVector = icon,
                     contentDescription = null,
-                    tint = MaterialTheme.colorScheme.primary,
+                    tint = SplashGlassMintAccent,
                     modifier = Modifier.size(22.dp)
                 )
             }
@@ -1110,13 +1287,13 @@ private fun FeatureHighlightRow(
             Text(
                 text = title,
                 style = MaterialTheme.typography.titleSmall,
-                fontWeight = FontWeight.SemiBold,
-                color = MaterialTheme.colorScheme.onSurface
+                fontWeight = FontWeight.Bold,
+                color = SplashGlassTextPrimary
             )
             Text(
                 text = subtitle,
                 style = MaterialTheme.typography.bodySmall,
-                color = MaterialTheme.colorScheme.onSurfaceVariant
+                color = SplashGlassTextSecondary
             )
         }
     }

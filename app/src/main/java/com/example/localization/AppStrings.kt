@@ -95,6 +95,35 @@ object AppStrings {
         }
     }
 
+    fun categoryLabelForCode(
+        code: String,
+        managedCategories: List<com.example.model.ManagedCategory>,
+        lang: AppLanguage
+    ): String {
+        val normalized = code.trim().uppercase()
+        if (normalized.isBlank() || normalized == "ALL") {
+            return categoryLabel(AttractionCategory.ALL, lang)
+        }
+        val managed = managedCategories.firstOrNull {
+            it.effectiveCode.equals(normalized, ignoreCase = true)
+        }
+        if (managed != null && managed.name.isNotBlank()) {
+            val isUnmodifiedDefault = com.example.model.CategoryCatalog.isDefaultNameUnmodified(
+                managed.effectiveCode,
+                managed.name
+            )
+            if (!isUnmodifiedDefault) {
+                return managed.name
+            }
+        }
+        val builtIn = enumValues<AttractionCategory>().firstOrNull { it.name == normalized }
+        if (builtIn != null) {
+            return categoryLabel(builtIn, lang)
+        }
+        return managed?.name?.takeIf { it.isNotBlank() }
+            ?: com.example.model.CategoryCatalog.prettyDisplayNameFromCode(normalized)
+    }
+
     fun travelModeLabel(mode: TravelMode, lang: AppLanguage) = when (mode) {
         TravelMode.WALK -> when (lang) {
             AppLanguage.EN -> "Walk"

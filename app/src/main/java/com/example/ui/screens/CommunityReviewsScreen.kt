@@ -19,15 +19,20 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.AddComment
 import androidx.compose.material.icons.filled.Favorite
 import androidx.compose.material.icons.filled.Star
+import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.material.icons.filled.PhotoCamera
+import androidx.compose.material.icons.filled.ThumbUp
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.CircularProgressIndicator
+import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.FilterChip
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.material3.minimumInteractiveComponentSize
+import androidx.compose.material3.pulltorefresh.PullToRefreshBox
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
@@ -48,29 +53,49 @@ import com.example.model.AppLanguage
 import com.example.model.Attraction
 import com.example.model.CommunityReview
 import com.example.model.UiState
+import com.example.ui.components.AdminOfficialReplyDialog
 import com.example.ui.components.AttractionCoverImage
 import com.example.ui.components.ComposeReviewDialog
 import com.example.ui.components.ReviewCard
+import com.example.ui.components.liquidGlassBorder
+import com.example.ui.components.liquidGlassCardColors
 import com.example.ui.theme.MapRatingGold
 
+@OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun CommunityReviewsScreen(
     language: AppLanguage,
     currentUserId: String,
+    isAdmin: Boolean = false,
     attractions: List<Attraction>,
     favoriteAttractions: List<Attraction> = emptyList(),
     reviewsState: UiState<List<CommunityReview>>,
+    isRefreshing: Boolean = false,
+    onRefreshAll: () -> Unit = {},
     onOpenAttraction: (Attraction) -> Unit = {},
+    onShowOnMap: (Attraction) -> Unit = {},
     onToggleFavorite: (Attraction) -> Unit = {},
-    onSubmitReview: (Attraction, Int, String, String) -> Unit,
-    onUpdateReview: (String, Int, String, String) -> Unit,
-    onDeleteReview: (String) -> Unit
+    onSubmitReview: (Attraction, Int, String, String, String?) -> Unit,
+    onUpdateReview: (String, Int, String, String, String?, Boolean) -> Unit,
+    onDeleteReview: (String) -> Unit,
+    onToggleReviewHelpful: (CommunityReview) -> Unit = {},
+    onAdminReplyReview: (String, String) -> Unit = { _, _ -> }
 ) {
     var filterAttractionId by remember { mutableStateOf<String?>(null) }
     var myReviewsOnly by remember { mutableStateOf(false) }
+    var withPhotosOnly by remember { mutableStateOf(false) }
+    var sortMostHelpful by remember { mutableStateOf(false) }
     var showComposeDialog by remember { mutableStateOf(false) }
     var editingReview by remember { mutableStateOf<CommunityReview?>(null) }
+    var replyingReview by remember { mutableStateOf<CommunityReview?>(null) }
 
+    PullToRefreshBox(
+        isRefreshing = isRefreshing,
+        onRefresh = onRefreshAll,
+        modifier = Modifier
+            .fillMaxSize()
+            .testTag("reviews_pull_to_refresh")
+    ) {
     TravelPageGrid("reviews_page") {
         pageSection {
             val reviews = (reviewsState as? UiState.Success)?.data
@@ -91,8 +116,9 @@ fun CommunityReviewsScreen(
         // Dedicated Favorite Attractions quick-access card
         pageSection {
             Card(
-                shape = RoundedCornerShape(20.dp),
-                colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface)
+                shape = RoundedCornerShape(22.dp),
+                border = liquidGlassBorder(),
+                colors = liquidGlassCardColors()
             ) {
                 Column(
                     modifier = Modifier
@@ -190,12 +216,31 @@ fun CommunityReviewsScreen(
             LazyRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                 item {
                     FilterChip(
-                        selected = filterAttractionId == null && !myReviewsOnly,
+                        selected = filterAttractionId == null && !myReviewsOnly && !withPhotosOnly,
                         onClick = {
                             filterAttractionId = null
                             myReviewsOnly = false
+                            withPhotosOnly = false
                         },
                         label = { Text("All Spots") }
+                    )
+                }
+                item {
+                    FilterChip(
+                        selected = sortMostHelpful,
+                        onClick = { sortMostHelpful = !sortMostHelpful },
+                        leadingIcon = { Icon(Icons.Default.ThumbUp, contentDescription = null, modifier = Modifier.size(14.dp)) },
+                        label = { Text("Most Helpful") },
+                        modifier = Modifier.testTag("filter_most_helpful_chip")
+                    )
+                }
+                item {
+                    FilterChip(
+                        selected = withPhotosOnly,
+                        onClick = { withPhotosOnly = !withPhotosOnly },
+                        leadingIcon = { Icon(Icons.Default.PhotoCamera, contentDescription = null, modifier = Modifier.size(14.dp)) },
+                        label = { Text("With Photos") },
+                        modifier = Modifier.testTag("filter_with_photos_chip")
                     )
                 }
                 item {
@@ -244,11 +289,26 @@ fun CommunityReviewsScreen(
                 val filtered = reviewsState.data.filter { review ->
                     val matchesAttraction = filterAttractionId == null || review.attractionId == filterAttractionId
                     val matchesMine = !myReviewsOnly || review.userId == currentUserId
-                    matchesAttraction && matchesMine
+                    val matchesPhoto = !withPhotosOnly || review.photoData.isNotBlank()
+                    matchesAttraction && matchesMine && matchesPhoto
+                }.let { list ->
+                    if (sortMostHelpful) {
+                        list.sortedWith(
+                            compareByDescending<CommunityReview> { it.helpfulUserIds.size }
+                                .thenByDescending { it.verifiedVisit }
+                                .thenByDescending { it.createdAt?.toDate()?.time ?: 0L }
+                        )
+                    } else {
+                        list
+                    }
                 }
                 if (filtered.isEmpty()) {
                     pageSection {
-                        Card(colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface)) {
+                        Card(
+                            shape = RoundedCornerShape(22.dp),
+                            border = liquidGlassBorder(),
+                            colors = liquidGlassCardColors()
+                        ) {
                             Column(
                                 modifier = Modifier.fillMaxWidth().padding(24.dp),
                                 horizontalAlignment = Alignment.CenterHorizontally
@@ -260,7 +320,7 @@ fun CommunityReviewsScreen(
                                     style = MaterialTheme.typography.titleMedium
                                 )
                                 Text(
-                                    text = "Post trail conditions, habal-habal tips, or highlights from Dumingag.",
+                                    text = "Post trail conditions, photos, habal-habal tips, or highlights from Dumingag.",
                                     style = MaterialTheme.typography.bodySmall,
                                     color = MaterialTheme.colorScheme.onSurfaceVariant
                                 )
@@ -273,14 +333,20 @@ fun CommunityReviewsScreen(
                         ReviewCard(
                             review = review,
                             isOwner = review.userId == currentUserId,
+                            currentUserId = currentUserId,
+                            isAdmin = isAdmin,
                             onEdit = { editingReview = review },
                             onDelete = { onDeleteReview(review.id) },
-                            onAttractionClick = linkedAttraction?.let { target -> { onOpenAttraction(target) } }
+                            onToggleHelpful = { onToggleReviewHelpful(review) },
+                            onAdminReply = { replyText -> onAdminReplyReview(review.id, replyText) },
+                            onAttractionClick = linkedAttraction?.let { target -> { onOpenAttraction(target) } },
+                            onViewOnMap = linkedAttraction?.let { target -> { onShowOnMap(target) } }
                         )
                     }
                 }
             }
         }
+    }
     }
 
     if (showComposeDialog && attractions.isNotEmpty()) {
@@ -289,8 +355,8 @@ fun CommunityReviewsScreen(
             attractions = attractions,
             initialReview = null,
             onDismiss = { showComposeDialog = false },
-            onSave = { attraction, rating, comment, tag ->
-                onSubmitReview(attraction, rating, comment, tag)
+            onSave = { attraction, rating, comment, tag, photoData ->
+                onSubmitReview(attraction, rating, comment, tag, photoData)
                 showComposeDialog = false
             }
         )
@@ -303,11 +369,25 @@ fun CommunityReviewsScreen(
                 attractions = attractions,
                 initialReview = rev,
                 onDismiss = { editingReview = null },
-                onSave = { _, rating, comment, tag ->
-                    onUpdateReview(rev.id, rating, comment, tag)
+                onSave = { _, rating, comment, tag, photoData ->
+                    val clearPhoto = photoData == null && rev.photoData.isNotBlank()
+                    onUpdateReview(rev.id, rating, comment, tag, photoData, clearPhoto)
                     editingReview = null
                 }
             )
         }
+    }
+
+    replyingReview?.let { rev ->
+        AdminOfficialReplyDialog(
+            attractionName = rev.attractionName,
+            authorName = rev.authorName,
+            initialReply = rev.adminReply,
+            onDismiss = { replyingReview = null },
+            onSave = { replyText ->
+                onAdminReplyReview(rev.id, replyText)
+                replyingReview = null
+            }
+        )
     }
 }

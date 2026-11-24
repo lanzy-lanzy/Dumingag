@@ -38,7 +38,7 @@ class AdminLayoutTest {
                         attractions = attractions,
                         emergencyContacts = DumingagSeedData.emergencyContacts,
                         onBackClick = {},
-                        onSaveAttraction = { _, _, _, _, _, _, _, _, _, _, _, _, _, _, _, _, _, _ -> },
+                        onSaveAttraction = { _, _, _, _, _, _, _, _, _, _, _, _, _, _, _, _, _, _, _ -> },
                         onDeleteAttraction = {}, onSaveEmergencyContact = { _, _, _, _, _, _, _, _ -> },
                         onDeleteEmergencyContact = {}
                     )

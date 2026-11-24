@@ -52,6 +52,16 @@ class AttractionRepository(private val attractionDao: AttractionDao) {
             .map { entities -> entities.map { it.toDomain() } }
     }
 
+    fun observeFilteredAttractionsByCode(
+        query: String,
+        categoryCode: String?
+    ): Flow<List<Attraction>> {
+        val trimmed = query.trim()
+        val normalized = categoryCode?.trim()?.uppercase()?.takeIf { it.isNotBlank() && it != "ALL" }
+        return attractionDao.observeFilteredAttractions(trimmed, normalized)
+            .map { entities -> entities.map { it.toDomain() } }
+    }
+
     fun observeAttractionById(id: String): Flow<Attraction?> =
         attractionDao.observeById(id).map { entity -> entity?.toDomain() }
 
@@ -118,7 +128,7 @@ class AttractionRepository(private val attractionDao: AttractionDao) {
             historyNoteTl = historyNote.tl,
             historyNoteEs = historyNote.es,
             barangay = barangay,
-            category = category.name,
+            category = categoryCode.ifBlank { category.name },
             latitude = latitude,
             longitude = longitude,
             mapX = mapX,
@@ -166,6 +176,7 @@ class AttractionRepository(private val attractionDao: AttractionDao) {
             transitHint = LocalizedText(transitHint, transitHintCeb, transitHintTl, transitHintEs),
             baseRating = baseRating,
             imageKey = imageKey,
-            photoData = photoData
+            photoData = photoData,
+            categoryCode = category.ifBlank { AttractionCategory.LANDMARK.name }
         )
 }

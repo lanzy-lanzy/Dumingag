@@ -63,7 +63,7 @@ class TravelPagesLayoutTest {
                                     CommunityReview(id = "a", attractionName = "Review A"),
                                     CommunityReview(id = "b", attractionName = "Review B")
                                 )),
-                                onSubmitReview = { _, _, _, _ -> }, onUpdateReview = { _, _, _, _ -> }, onDeleteReview = {}
+                                onSubmitReview = { _, _, _, _, _ -> }, onUpdateReview = { _, _, _, _, _, _ -> }, onDeleteReview = {}
                             )
                         }
                     }
@@ -121,8 +121,8 @@ class TravelPagesLayoutTest {
                             )
                         )
                     ),
-                    onSubmitReview = { _, _, _, _ -> },
-                    onUpdateReview = { _, _, _, _ -> },
+                    onSubmitReview = { _, _, _, _, _ -> },
+                    onUpdateReview = { _, _, _, _, _, _ -> },
                     onDeleteReview = {}
                 )
             }

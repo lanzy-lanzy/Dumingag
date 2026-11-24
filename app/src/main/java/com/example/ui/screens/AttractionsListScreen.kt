@@ -58,16 +58,21 @@ import com.example.localization.AppStrings
 import com.example.model.AppLanguage
 import com.example.model.Attraction
 import com.example.model.AttractionCategory
+import com.example.model.CategoryCatalog
+import com.example.model.ManagedCategory
 import com.example.model.UiState
 import com.example.ui.components.AttractionCoverImage
 import com.example.ui.components.AttractionSearchBar
-import com.example.ui.components.CategoryFilterChips
+import com.example.ui.components.ManagedCategoryFilterChips
+import com.example.ui.components.liquidGlassBorder
+import com.example.ui.components.liquidGlassCardColors
 import com.example.viewmodel.AttractionsViewModel
 
 @Composable
 fun AttractionsListScreen(
     viewModel: AttractionsViewModel,
     language: AppLanguage,
+    managedCategories: List<ManagedCategory> = CategoryCatalog.defaultCategories,
     favoriteIds: Set<String> = emptySet(),
     onToggleFavorite: (Attraction) -> Unit = {},
     onAttractionClick: (Attraction) -> Unit,
@@ -77,7 +82,9 @@ fun AttractionsListScreen(
     val uiState by viewModel.uiState.collectAsStateWithLifecycle()
     val searchQuery by viewModel.searchQuery.collectAsStateWithLifecycle()
     val selectedCategory by viewModel.selectedCategory.collectAsStateWithLifecycle()
+    val selectedCategoryCode by viewModel.selectedCategoryCode.collectAsStateWithLifecycle()
     val savedIds by viewModel.savedAttractionIds.collectAsStateWithLifecycle()
+    val activeCategories = managedCategories.ifEmpty { CategoryCatalog.defaultCategories }
 
     Column(modifier = Modifier.fillMaxSize()) {
         // Directory Header
@@ -138,10 +145,11 @@ fun AttractionsListScreen(
             showCategoryChips = false,
             modifier = Modifier.padding(bottom = 6.dp)
         )
-        CategoryFilterChips(
-            selectedCategory = selectedCategory,
-            onCategorySelected = viewModel::setCategory,
+        ManagedCategoryFilterChips(
+            selectedCategoryCode = selectedCategoryCode,
+            onCategoryCodeSelected = viewModel::setCategoryCode,
             language = language,
+            managedCategories = activeCategories,
             modifier = Modifier.padding(bottom = 10.dp)
         )
 
@@ -201,7 +209,7 @@ fun AttractionsListScreen(
                         TextButton(
                             onClick = {
                                 viewModel.setSearchQuery("")
-                                viewModel.setCategory(AttractionCategory.ALL)
+                                viewModel.setCategoryCode("ALL")
                             },
                             modifier = Modifier.heightIn(min = 48.dp)
                         ) {
@@ -217,6 +225,7 @@ fun AttractionsListScreen(
                         items(items, key = { it.id }) { attraction ->
                             AttractionDirectoryRowCard(
                                 attraction = attraction,
+                                categoryLabel = AppStrings.categoryLabelForCode(attraction.categoryCode, activeCategories, language),
                                 language = language,
                                 isSavedOffline = savedIds.contains(attraction.id),
                                 isFavorite = favoriteIds.contains(attraction.id),
@@ -237,6 +246,7 @@ fun AttractionsListScreen(
 @Composable
 private fun AttractionDirectoryRowCard(
     attraction: Attraction,
+    categoryLabel: String,
     language: AppLanguage,
     isSavedOffline: Boolean,
     isFavorite: Boolean,
@@ -250,9 +260,10 @@ private fun AttractionDirectoryRowCard(
             .fillMaxWidth()
             .clickable(onClick = onClick)
             .testTag("directory_attraction_${attraction.id}"),
-        shape = RoundedCornerShape(18.dp),
-        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
-        elevation = CardDefaults.cardElevation(defaultElevation = 2.dp)
+        shape = RoundedCornerShape(22.dp),
+        colors = liquidGlassCardColors(),
+        border = liquidGlassBorder(),
+        elevation = CardDefaults.cardElevation(defaultElevation = 0.dp)
     ) {
         Column(modifier = Modifier.padding(14.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
             Row(
@@ -279,9 +290,9 @@ private fun AttractionDirectoryRowCard(
                             shape = RoundedCornerShape(50)
                         ) {
                             Text(
-                                text = AppStrings.categoryLabel(attraction.category, language),
+                                text = categoryLabel,
                                 style = MaterialTheme.typography.labelSmall,
-                                color = MaterialTheme.colorScheme.primary,
+                                color = MaterialTheme.colorScheme.onPrimaryContainer,
                                 modifier = Modifier.padding(horizontal = 8.dp, vertical = 3.dp)
                             )
                         }

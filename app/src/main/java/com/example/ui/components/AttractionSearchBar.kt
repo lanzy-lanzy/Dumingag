@@ -68,18 +68,15 @@ fun AttractionSearchBar(
             modifier = Modifier
                 .fillMaxWidth()
                 .padding(horizontal = 16.dp),
-            shape = RoundedCornerShape(24.dp),
-            color = MaterialTheme.colorScheme.surface,
+            shape = RoundedCornerShape(26.dp),
+            color = MaterialTheme.colorScheme.surface.copy(alpha = 0.84f),
             tonalElevation = 2.dp,
-            shadowElevation = 1.dp,
-            border = BorderStroke(
-                width = 1.dp,
-                color = if (hasActiveFilter) {
-                    MaterialTheme.colorScheme.primary.copy(alpha = 0.5f)
-                } else {
-                    MaterialTheme.colorScheme.outlineVariant
-                }
-            )
+            shadowElevation = 3.dp,
+            border = if (hasActiveFilter) {
+                BorderStroke(1.3.dp, MaterialTheme.colorScheme.primary.copy(alpha = 0.55f))
+            } else {
+                liquidGlassBorder()
+            }
         ) {
             TextField(
                 value = query,
